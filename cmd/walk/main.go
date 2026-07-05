@@ -8,6 +8,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"sort"
+	"strings"
 	"time"
 
 	"github.com/lxn/walk"
@@ -32,16 +33,17 @@ type GarqMainWindow struct {
 	navTree     *walk.TreeView
 	fileList    *walk.TableView
 	pathEdit    *walk.LineEdit
+	searchEdit  *walk.LineEdit
 	statusLabel *walk.Label
 	navModel    *NavTreeModel
 	fileModel   *FileTableModel
+	allEntries  []FileEntry
 	history     []string
 	historyIdx  int
 	clipboard   []string
 	clipboardCut bool
 	sortBy      int
 	sortDirAsc  bool
-	viewMode    int
 }
 
 type NavItem struct {
@@ -201,8 +203,14 @@ func main() {
 									PushButton{Text: "Renomear", OnClicked: func() { mw.renameSelected() }},
 									PushButton{Text: "Excluir", OnClicked: func() { mw.deleteSelected() }},
 									VSeparator{},
-									PushButton{Text: "Ordenar", OnClicked: func() { mw.cycleSortMode() }},
-									PushButton{Text: "Visualizar", OnClicked: func() { mw.cycleViewMode() }},
+								PushButton{Text: "Ordenar", OnClicked: func() { mw.cycleSortMode() }},
+								HSpacer{},
+									Label{Text: "Buscar:"},
+									LineEdit{
+										AssignTo:    &mw.searchEdit,
+										CueBanner:  "Filtrar arquivos...",
+										OnTextChanged: func() { mw.filterBySearch() },
+									},
 								},
 							},
 							TableView{
@@ -210,15 +218,40 @@ func main() {
 								Model:            mw.fileModel,
 								AlternatingRowBG: true,
 								MultiSelection:   true,
+								OnKeyDown: func(key walk.Key) {
+									mods := walk.ModifiersDown()
+									switch {
+									case key == walk.KeyF2:
+										mw.renameSelected()
+									case key == walk.KeyDelete:
+										mw.deleteSelected()
+									case key == walk.KeyC && mods&walk.ModControl != 0:
+										mw.copySelected()
+									case key == walk.KeyX && mods&walk.ModControl != 0:
+										mw.cutSelected()
+									case key == walk.KeyV && mods&walk.ModControl != 0:
+										mw.pasteClipboard()
+									case key == walk.KeyF5:
+										mw.navigateTo(mw.pathEdit.Text())
+									case key == walk.KeyUp && mods&walk.ModAlt != 0:
+										mw.goUp()
+									case key == walk.KeyLeft && mods&walk.ModAlt != 0:
+										mw.goBack()
+									case key == walk.KeyRight && mods&walk.ModAlt != 0:
+										mw.goForward()
+									case key == walk.KeyReturn:
+										mw.activateSelected()
+									}
+								},
 								ContextMenuItems: []MenuItem{
 									Action{Text: "Abrir", OnTriggered: func() { mw.activateSelected() }},
 									Separator{},
-									Action{Text: "Renomear", OnTriggered: func() { mw.renameSelected() }},
-									Action{Text: "Excluir", OnTriggered: func() { mw.deleteSelected() }},
+									Action{Text: "Renomear\tF2", OnTriggered: func() { mw.renameSelected() }},
+									Action{Text: "Excluir\tDel", OnTriggered: func() { mw.deleteSelected() }},
 									Separator{},
-									Action{Text: "Copiar", OnTriggered: func() { mw.copySelected() }},
-									Action{Text: "Recortar", OnTriggered: func() { mw.cutSelected() }},
-									Action{Text: "Colar", OnTriggered: func() { mw.pasteClipboard() }},
+									Action{Text: "Copiar\tCtrl+C", OnTriggered: func() { mw.copySelected() }},
+									Action{Text: "Recortar\tCtrl+X", OnTriggered: func() { mw.cutSelected() }},
+									Action{Text: "Colar\tCtrl+V", OnTriggered: func() { mw.pasteClipboard() }},
 									Separator{},
 									Action{Text: "Nova Pasta", OnTriggered: func() { mw.createNewFolder() }},
 								},
@@ -355,8 +388,12 @@ func (mw *GarqMainWindow) navigateTo(path string) {
 
 	mw.Synchronize(func() {
 		mw.fileModel.entries = fileEntries
+		mw.allEntries = fileEntries
 		mw.fileList.SetModel(mw.fileModel)
 		mw.statusLabel.SetText(fmt.Sprintf("%d itens", len(entries)))
+		if mw.searchEdit != nil {
+			mw.searchEdit.SetText("")
+		}
 	})
 }
 
@@ -393,6 +430,29 @@ func (mw *GarqMainWindow) updateStatusBar() {
 	} else {
 		mw.statusLabel.SetText(fmt.Sprintf("%d itens", total))
 	}
+}
+
+func (mw *GarqMainWindow) filterBySearch() {
+	query := mw.searchEdit.Text()
+	if query == "" {
+		mw.fileModel.entries = mw.allEntries
+	} else {
+		var filtered []FileEntry
+		for _, e := range mw.allEntries {
+			if containsIgnoreCase(e.Name, query) {
+				filtered = append(filtered, e)
+			}
+		}
+		mw.fileModel.entries = filtered
+	}
+	mw.fileList.SetModel(mw.fileModel)
+	mw.updateStatusBar()
+}
+
+func containsIgnoreCase(s, sub string) bool {
+	s = strings.ToLower(s)
+	sub = strings.ToLower(sub)
+	return strings.Contains(s, sub)
 }
 
 func (mw *GarqMainWindow) getSelectedPaths() []string {
@@ -647,12 +707,6 @@ func (mw *GarqMainWindow) cycleSortMode() {
 	mw.Synchronize(func() { mw.fileList.SetModel(mw.fileModel) })
 	names := []string{"Nome", "Tamanho", "Tipo", "Data"}
 	mw.statusLabel.SetText(fmt.Sprintf("Ordenado por %s", names[mw.sortBy]))
-}
-
-func (mw *GarqMainWindow) cycleViewMode() {
-	mw.viewMode = (mw.viewMode + 1) % 5
-	names := []string{"Detalhes", "Lista", "Ícones", "Mosaicos", "Conteúdo"}
-	mw.statusLabel.SetText(fmt.Sprintf("Visualização: %s", names[mw.viewMode]))
 }
 
 func copyPath(src, dst string) error {
