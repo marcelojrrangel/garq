@@ -408,7 +408,11 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 							case key == walk.KeyF2:
 								mw.renameSelected()
 							case key == walk.KeyDelete:
-								mw.deleteSelected()
+								if mods&walk.ModShift != 0 {
+									mw.deleteSelectedPermanently()
+								} else {
+									mw.deleteSelected()
+								}
 							case key == walk.KeyC && mods&walk.ModControl != 0:
 								mw.copySelected()
 							case key == walk.KeyX && mods&walk.ModControl != 0:
@@ -450,7 +454,8 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 							Action{Text: "Abrir", OnTriggered: func() { mw.activateSelected() }},
 							Separator{},
 							Action{Text: "Renomear\tF2", OnTriggered: func() { mw.renameSelected() }},
-							Action{Text: "Excluir\tDel", OnTriggered: func() { mw.deleteSelected() }},
+							Action{Text: "Mover para Lixeira\tDel", OnTriggered: func() { mw.deleteSelected() }},
+							Action{Text: "Excluir permanentemente\tShift+Del", OnTriggered: func() { mw.deleteSelectedPermanently() }},
 							Separator{},
 							Action{Text: "Copiar\tCtrl+C", OnTriggered: func() { mw.copySelected() }},
 							Action{Text: "Recortar\tCtrl+X", OnTriggered: func() { mw.cutSelected() }},
@@ -1061,13 +1066,30 @@ func (mw *GarqMainWindow) deleteSelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado")
 		return
 	}
+	if err := RecycleItems(paths); err != nil {
+		mw.statusLabel.SetText(fmt.Sprintf("Erro ao mover para lixeira: %v", err))
+		return
+	}
+	mw.statusLabel.SetText(fmt.Sprintf("🗑 %d item(s) movido(s) para a Lixeira", len(paths)))
+	tp := mw.activeTab()
+	if tp != nil {
+		mw.navigateTo(tp.currentPath())
+	}
+}
+
+func (mw *GarqMainWindow) deleteSelectedPermanently() {
+	paths := mw.getSelectedPaths()
+	if len(paths) == 0 {
+		mw.statusLabel.SetText("Nenhum item selecionado")
+		return
+	}
 	count := 0
 	for _, p := range paths {
 		if err := os.RemoveAll(p); err == nil {
 			count++
 		}
 	}
-	mw.statusLabel.SetText(fmt.Sprintf("Excluído(s) %d item(s)", count))
+	mw.statusLabel.SetText(fmt.Sprintf("✗ %d item(s) excluído(s) permanentemente", count))
 	tp := mw.activeTab()
 	if tp != nil {
 		mw.navigateTo(tp.currentPath())
