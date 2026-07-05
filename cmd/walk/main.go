@@ -433,6 +433,17 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 								mw.closeCurrentTab()
 							case key == walk.KeyTab && mods&walk.ModControl != 0:
 								mw.nextTab()
+							case key == walk.KeyA && mods&walk.ModControl != 0:
+								if tp := mw.activeTab(); tp != nil {
+									count := len(tp.fileModel.entries)
+									if count > 0 {
+										indexes := make([]int, count)
+										for i := range indexes {
+											indexes[i] = i
+										}
+										tp.fileList.SetSelectedIndexes(indexes)
+									}
+								}
 							}
 						},
 						ContextMenuItems: []MenuItem{
@@ -496,7 +507,7 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 
 func (mw *GarqMainWindow) closeCurrentTab() {
 	if len(mw.tabs) <= 1 {
-		// Não fechar a última aba
+		// Não fechar a última aba de navegação
 		return
 	}
 	idx := mw.tabWidget.CurrentIndex()
@@ -756,6 +767,48 @@ func (mw *GarqMainWindow) updateStatusBar() {
 	}
 }
 
+// updateActiveJobsStatus mostra na statusbar quantos jobs estão rodando.
+func (mw *GarqMainWindow) updateActiveJobsStatus() {
+	rows, err := mw.api.DB.Query(`SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running')`)
+	if err != nil {
+		return
+	}
+	defer rows.Close()
+	var count int
+	if rows.Next() {
+		rows.Scan(&count)
+	}
+	tp := mw.activeTab()
+	base := "Pronto"
+	if tp != nil {
+		total := len(tp.fileModel.entries)
+		base = fmt.Sprintf("%d itens", total)
+	}
+	if count > 0 {
+		mw.statusLabel.SetText(fmt.Sprintf("%s  ·  ⏳ %d operação(ões) em andamento", base, count))
+	} else {
+		mw.statusLabel.SetText(base)
+	}
+}
+
+// refreshActiveTab recarrega o diretório atual da aba ativa (equivalente ao F5).
+func (mw *GarqMainWindow) refreshActiveTab() {
+	tp := mw.activeTab()
+	if tp == nil {
+		return
+	}
+	path := tp.currentPath()
+	if path == "" {
+		return
+	}
+	go mw.navigateTabTo(tp, path)
+}
+
+// openProgressDialog abre um dialog de progresso para um job recém-criado.
+func (mw *GarqMainWindow) openProgressDialog(jobID int64, jobType string) {
+	newProgressDialog(mw, mw.api.DB, jobID, jobType)
+}
+
 func (mw *GarqMainWindow) filterBySearch() {
 	tp := mw.activeTab()
 	if tp == nil {
@@ -949,32 +1002,29 @@ func (mw *GarqMainWindow) pasteClipboard() {
 		mw.statusLabel.SetText("Nenhuma pasta de destino")
 		return
 	}
-	count := 0
-	for _, src := range paths {
-		baseName := filepath.Base(src)
-		dst := filepath.Join(dest, baseName)
-		if isCut {
-			if filepath.Dir(src) == dest {
-				count++
-				continue
-			}
-			if err := os.Rename(src, dst); err == nil {
-				count++
-			}
-		} else {
-			if src == dst {
-				dst = getCopyPath(dest, baseName)
-			}
-			if err := copyPath(src, dst); err == nil {
-				count++
-			}
-		}
+
+	// Enfileira via worker e abre dialog de progresso
+	jobType := "copy"
+	if isCut {
+		jobType = "move"
+	}
+	jobID, err := mw.api.AddCopyJob(paths, dest, "replace")
+	if isCut {
+		jobID, err = mw.api.AddMoveJob(paths, dest, "replace")
+	}
+	if err != nil {
+		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
+		return
 	}
 	if isCut {
 		walk.Clipboard().Clear()
 	}
-	mw.statusLabel.SetText(fmt.Sprintf("Colado(s) %d item(s)", count))
-	mw.navigateTo(dest)
+	mw.statusLabel.SetText(fmt.Sprintf("⏳ Iniciando %s de %d item(s)...", jobType, len(paths)))
+	go func() {
+		mw.Synchronize(func() {
+			mw.openProgressDialog(jobID, jobType)
+		})
+	}()
 }
 
 func (mw *GarqMainWindow) renameSelected() {

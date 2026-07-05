@@ -20,6 +20,7 @@ import (
 var (
 	mu       sync.Mutex
 	jobs     = make(map[int64]context.CancelFunc)
+	pauseChs = make(map[int64]chan struct{})
 )
 
 func StartWorkerPool(n int, conn *sql.DB) {
@@ -35,12 +36,68 @@ func CancelJob(jobID int64) {
 		cancel()
 		delete(jobs, jobID)
 	}
+	// Desbloqueia se estiver pausado
+	if ch, ok := pauseChs[jobID]; ok {
+		select {
+		case ch <- struct{}{}:
+		default:
+		}
+		delete(pauseChs, jobID)
+	}
+}
+
+// PauseJob suspende a execução de um job. Bloqueia o worker até ResumeJob ser chamado.
+func PauseJob(jobID int64) {
+	mu.Lock()
+	ch, ok := pauseChs[jobID]
+	mu.Unlock()
+	if !ok {
+		return
+	}
+	// Sinaliza pausa — o worker lê do canal e fica bloqueado aguardando retomada
+	ch <- struct{}{}
+}
+
+// ResumeJob retoma um job pausado.
+func ResumeJob(jobID int64) {
+	mu.Lock()
+	ch, ok := pauseChs[jobID]
+	mu.Unlock()
+	if !ok {
+		return
+	}
+	ch <- struct{}{}
+}
+
+// checkPause verifica se o job deve pausar. Usa dois sinais no mesmo canal:
+// primeiro sinal = pausar (bloqueia), segundo sinal = retomar (desbloqueia).
+func checkPause(jobID int64, ctx context.Context) bool {
+	mu.Lock()
+	ch, ok := pauseChs[jobID]
+	mu.Unlock()
+	if !ok {
+		return false
+	}
+	select {
+	case <-ch:
+		// Pausado — aguarda retomada ou cancelamento
+		select {
+		case <-ch:
+			return false // retomado
+		case <-ctx.Done():
+			return true // cancelado enquanto pausado
+		}
+	default:
+		return false
+	}
 }
 
 func registerJob(ctx context.Context, jobID int64) context.Context {
 	ctx, cancel := context.WithCancel(ctx)
+	ch := make(chan struct{}, 2)
 	mu.Lock()
 	jobs[jobID] = cancel
+	pauseChs[jobID] = ch
 	mu.Unlock()
 	return ctx
 }
@@ -48,6 +105,7 @@ func registerJob(ctx context.Context, jobID int64) context.Context {
 func unregisterJob(jobID int64) {
 	mu.Lock()
 	delete(jobs, jobID)
+	delete(pauseChs, jobID)
 	mu.Unlock()
 }
 
@@ -117,6 +175,9 @@ func runCopyJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[stri
 
 	for idx, src := range sources {
 		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if checkPause(jobID, ctx) {
 			return ctx.Err()
 		}
 		fileName := filepath.Base(src)
@@ -274,6 +335,9 @@ func runMoveJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[stri
 
 	for idx, src := range sources {
 		if ctx.Err() != nil {
+			return ctx.Err()
+		}
+		if checkPause(jobID, ctx) {
 			return ctx.Err()
 		}
 		fileName := filepath.Base(src)
