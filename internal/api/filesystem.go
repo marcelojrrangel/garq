@@ -1,6 +1,7 @@
 package api
 
 import (
+	"fmt"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -18,16 +19,21 @@ type fsItem struct {
 }
 
 func (a *API) ListRoots() ([]string, error) {
+	fmt.Println("ListRoots called")
 	if runtime.GOOS != "windows" {
+		fmt.Println("Not windows, returning /")
 		return []string{"/"}, nil
 	}
 	roots := make([]string, 0, 8)
 	for c := 'A'; c <= 'Z'; c++ {
 		drive := string(c) + ":\\"
+		fmt.Printf("Checking drive %s...\n", drive)
 		if _, err := os.Stat(drive); err == nil {
 			roots = append(roots, drive)
+			fmt.Printf("  -> found %s\n", drive)
 		}
 	}
+	fmt.Printf("ListRoots returning %d drives\n", len(roots))
 	return roots, nil
 }
 

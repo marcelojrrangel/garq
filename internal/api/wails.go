@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -9,9 +10,10 @@ import (
 	"garq/internal/worker"
 )
 
-// API holds resources to be bound into Wails frontend.
+// API holds resources for the file manager backend.
 type API struct {
-	DB *sql.DB
+	DB  *sql.DB
+	Ctx context.Context
 }
 
 // AddCopyJob enqueues a copy job. Called from frontend via Wails.
