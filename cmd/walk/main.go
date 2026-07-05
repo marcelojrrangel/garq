@@ -29,21 +29,22 @@ type FileEntry struct {
 
 type GarqMainWindow struct {
 	*walk.MainWindow
-	api         *api.API
-	navTree     *walk.TreeView
-	fileList    *walk.TableView
-	pathEdit    *walk.LineEdit
-	searchEdit  *walk.LineEdit
-	statusLabel *walk.Label
-	navModel    *NavTreeModel
-	fileModel   *FileTableModel
-	allEntries  []FileEntry
-	history     []string
-	historyIdx  int
-	clipboard   []string
-	clipboardCut bool
-	sortBy      int
-	sortDirAsc  bool
+	api           *api.API
+	navTree       *walk.TreeView
+	fileList      *walk.TableView
+	pathEdit      *walk.LineEdit
+	searchEdit    *walk.LineEdit
+	statusLabel   *walk.Label
+	previewImage  *walk.ImageView
+	previewText   *walk.TextEdit
+	previewLabel  *walk.Label
+	navModel      *NavTreeModel
+	fileModel     *FileTableModel
+	allEntries    []FileEntry
+	history       []string
+	historyIdx    int
+	sortBy        int
+	sortDirAsc    bool
 }
 
 type NavItem struct {
@@ -213,11 +214,13 @@ func main() {
 									},
 								},
 							},
-							TableView{
-								AssignTo:         &mw.fileList,
-								Model:            mw.fileModel,
-								AlternatingRowBG: true,
-								MultiSelection:   true,
+							HSplitter{
+								Children: []Widget{
+									TableView{
+										AssignTo:         &mw.fileList,
+										Model:            mw.fileModel,
+										AlternatingRowBG: true,
+										MultiSelection:   true,
 								OnKeyDown: func(key walk.Key) {
 									mods := walk.ModifiersDown()
 									switch {
@@ -239,6 +242,8 @@ func main() {
 										mw.goBack()
 									case key == walk.KeyRight && mods&walk.ModAlt != 0:
 										mw.goForward()
+									case key == walk.KeyReturn && mods&walk.ModAlt != 0:
+										mw.showProperties()
 									case key == walk.KeyReturn:
 										mw.activateSelected()
 									}
@@ -254,15 +259,36 @@ func main() {
 									Action{Text: "Colar\tCtrl+V", OnTriggered: func() { mw.pasteClipboard() }},
 									Separator{},
 									Action{Text: "Nova Pasta", OnTriggered: func() { mw.createNewFolder() }},
+									Action{Text: "Propriedades\tAlt+Enter", OnTriggered: func() { mw.showProperties() }},
 								},
-								Columns: []TableViewColumn{
-									{Title: "Nome", Width: 350},
-									{Title: "Modificado", Width: 150},
-									{Title: "Tipo", Width: 100},
-									{Title: "Tamanho", Width: 100, Alignment: AlignFar},
+										Columns: []TableViewColumn{
+											{Title: "Nome", Width: 350},
+											{Title: "Modificado", Width: 150},
+											{Title: "Tipo", Width: 100},
+											{Title: "Tamanho", Width: 100, Alignment: AlignFar},
+										},
+										OnItemActivated:     func() { mw.activateSelected() },
+										OnCurrentIndexChanged: func() {
+											mw.updateStatusBar()
+											mw.updatePreview()
+										},
+									},
+									Composite{
+										Layout: VBox{},
+										Children: []Widget{
+											Label{AssignTo: &mw.previewLabel, Text: "Pré-visualização"},
+											ImageView{
+												AssignTo: &mw.previewImage,
+												Mode:     ImageViewModeShrink,
+											},
+											TextEdit{
+												AssignTo: &mw.previewText,
+												ReadOnly: true,
+												VScroll:  true,
+											},
+										},
+									},
 								},
-								OnItemActivated: func() { mw.activateSelected() },
-								OnCurrentIndexChanged: func() { mw.updateStatusBar() },
 							},
 						},
 					},
@@ -273,6 +299,36 @@ func main() {
 	}).Create(); err != nil {
 		log.Fatal(err)
 	}
+
+	mw.DropFiles().Attach(func(files []string) {
+		dest := mw.pathEdit.Text()
+		if dest == "" {
+			return
+		}
+		successCount := 0
+		for _, src := range files {
+			baseName := filepath.Base(src)
+			dst := filepath.Join(dest, baseName)
+			info, err := os.Stat(src)
+			if err != nil {
+				continue
+			}
+			if info.IsDir() {
+				if err := copyPath(src, dst); err == nil {
+					successCount++
+				}
+			} else {
+				if src == dst {
+					dst = getCopyPath(dest, baseName)
+				}
+				if err := copyPath(src, dst); err == nil {
+					successCount++
+				}
+			}
+		}
+		mw.statusLabel.SetText(fmt.Sprintf("Importado(s) %d item(s)", successCount))
+		mw.navigateTo(dest)
+	})
 
 	go func() {
 		roots, err := mw.api.ListRoots()
@@ -455,6 +511,57 @@ func containsIgnoreCase(s, sub string) bool {
 	return strings.Contains(s, sub)
 }
 
+func (mw *GarqMainWindow) updatePreview() {
+	idx := mw.fileList.CurrentIndex()
+	if idx < 0 || idx >= len(mw.fileModel.entries) {
+		mw.previewLabel.SetText("Pré-visualização")
+		mw.previewImage.SetImage(nil)
+		mw.previewText.SetText("")
+		return
+	}
+	entry := mw.fileModel.entries[idx]
+
+	if entry.IsDir {
+		mw.previewLabel.SetText(fmt.Sprintf("Pasta: %s", entry.Name))
+		mw.previewImage.SetImage(nil)
+		mw.previewText.SetText("")
+		return
+	}
+
+	ext := strings.ToLower(filepath.Ext(entry.Name))
+	mw.previewLabel.SetText(fmt.Sprintf("%s — %s", entry.Name, formatSize(entry.Size)))
+
+	imageExts := map[string]bool{".jpg": true, ".jpeg": true, ".png": true, ".bmp": true, ".gif": true, ".ico": true, ".tiff": true}
+	textExts := map[string]bool{".txt": true, ".md": true, ".go": true, ".js": true, ".ts": true, ".py": true, ".json": true, ".xml": true, ".html": true, ".css": true, ".csv": true, ".log": true, ".ini": true, ".cfg": true, ".yaml": true, ".yml": true, ".toml": true, ".sh": true, ".bat": true, ".cmd": true}
+
+	if imageExts[ext] {
+		img, err := walk.NewImageFromFile(entry.Path)
+		if err == nil {
+			mw.previewImage.SetImage(img)
+			mw.previewText.SetText("")
+		} else {
+			mw.previewImage.SetImage(nil)
+			mw.previewText.SetText(fmt.Sprintf("Erro ao carregar imagem: %v", err))
+		}
+		return
+	}
+
+	mw.previewImage.SetImage(nil)
+
+	if textExts[ext] && entry.Size < 1<<20 {
+		data, err := os.ReadFile(entry.Path)
+		if err == nil {
+			mw.previewText.SetText(string(data))
+		} else {
+			mw.previewText.SetText(fmt.Sprintf("Erro ao ler arquivo: %v", err))
+		}
+		return
+	}
+
+	mw.previewText.SetText(fmt.Sprintf("Arquivo: %s\nTamanho: %s\nModificado: %s\nTipo: %s",
+		entry.Name, formatSize(entry.Size), entry.ModTime, ext))
+}
+
 func (mw *GarqMainWindow) getSelectedPaths() []string {
 	sel := mw.fileList.SelectedIndexes()
 	var paths []string
@@ -502,8 +609,8 @@ func (mw *GarqMainWindow) cutSelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado para recortar")
 		return
 	}
-	mw.clipboard = paths
-	mw.clipboardCut = true
+	data := "CUT:\n" + strings.Join(paths, "\n")
+	walk.Clipboard().SetText(data)
 	mw.statusLabel.SetText(fmt.Sprintf("Recortado(s) %d item(s) - pronto para colar", len(paths)))
 }
 
@@ -513,31 +620,53 @@ func (mw *GarqMainWindow) copySelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado para copiar")
 		return
 	}
-	mw.clipboard = paths
-	mw.clipboardCut = false
+	data := "COPY:\n" + strings.Join(paths, "\n")
+	walk.Clipboard().SetText(data)
 	mw.statusLabel.SetText(fmt.Sprintf("Copiado(s) %d item(s) - pronto para colar", len(paths)))
 }
 
 func (mw *GarqMainWindow) pasteClipboard() {
-	if len(mw.clipboard) == 0 {
+	text, err := walk.Clipboard().Text()
+	if err != nil || text == "" {
 		mw.statusLabel.SetText("Nada para colar - use Copiar ou Recortar primeiro")
 		return
 	}
+
+	lines := strings.SplitN(text, "\n", 2)
+	if len(lines) < 2 {
+		mw.statusLabel.SetText("Área de transferência inválida")
+		return
+	}
+
+	isCut := lines[0] == "CUT:"
+	var paths []string
+	for _, p := range strings.Split(lines[1], "\n") {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			paths = append(paths, p)
+		}
+	}
+
+	if len(paths) == 0 {
+		mw.statusLabel.SetText("Nada para colar")
+		return
+	}
+
 	dest := mw.pathEdit.Text()
 	if dest == "" {
 		mw.statusLabel.SetText("Nenhuma pasta de destino")
 		return
 	}
 	successCount := 0
-	for _, src := range mw.clipboard {
+	for _, src := range paths {
 		baseName := filepath.Base(src)
 		srcDir := filepath.Dir(src)
 		dst := filepath.Join(dest, baseName)
-		if mw.clipboardCut && srcDir == dest {
+		if isCut && srcDir == dest {
 			successCount++
 			continue
 		}
-		if mw.clipboardCut && srcDir != dest {
+		if isCut && srcDir != dest {
 			if err := os.Rename(src, dst); err == nil {
 				successCount++
 			}
@@ -550,9 +679,8 @@ func (mw *GarqMainWindow) pasteClipboard() {
 			}
 		}
 	}
-	if mw.clipboardCut {
-		mw.clipboard = nil
-		mw.clipboardCut = false
+	if isCut {
+		walk.Clipboard().Clear()
 	}
 	mw.statusLabel.SetText(fmt.Sprintf("Colado(s) %d item(s)", successCount))
 	mw.navigateTo(dest)
@@ -678,6 +806,108 @@ func (mw *GarqMainWindow) deleteSelected() {
 	}
 	mw.statusLabel.SetText(fmt.Sprintf("Excluído(s) %d item(s)", count))
 	mw.navigateTo(mw.pathEdit.Text())
+}
+
+func (mw *GarqMainWindow) showProperties() {
+	idx := mw.fileList.CurrentIndex()
+	if idx < 0 || idx >= len(mw.fileModel.entries) {
+		mw.statusLabel.SetText("Nenhum item selecionado")
+		return
+	}
+	entry := mw.fileModel.entries[idx]
+	info, err := os.Stat(entry.Path)
+	if err != nil {
+		mw.statusLabel.SetText(fmt.Sprintf("Erro ao ler propriedades: %v", err))
+		return
+	}
+
+	var lines []string
+	lines = append(lines, fmt.Sprintf("Nome: %s", info.Name()))
+	lines = append(lines, fmt.Sprintf("Caminho: %s", entry.Path))
+
+	if info.IsDir() {
+		lines = append(lines, "Tipo: Pasta")
+		fileCount, folderCount := countDirContents(entry.Path)
+		lines = append(lines, fmt.Sprintf("Conteúdo: %d arquivo(s), %d pasta(s)", fileCount, folderCount))
+	} else {
+		lines = append(lines, fmt.Sprintf("Tipo: %s", filepath.Ext(entry.Name)))
+		lines = append(lines, fmt.Sprintf("Tamanho: %s", formatSize(info.Size())))
+	}
+
+	lines = append(lines, fmt.Sprintf("Criado: %s", info.ModTime().Format("02/01/2006 15:04:05")))
+	lines = append(lines, fmt.Sprintf("Modificado: %s", info.ModTime().Format("02/01/2006 15:04:05")))
+
+	attr := ""
+	if info.Mode()&0200 != 0 {
+		attr += "Somente Leitura "
+	}
+	if info.Mode()&0100 != 0 {
+		attr += "Executável "
+	}
+	if attr == "" {
+		attr = "Normal"
+	}
+	lines = append(lines, fmt.Sprintf("Atributos: %s", attr))
+
+	dlg, err := walk.NewDialog(mw.MainWindow)
+	if err != nil {
+		return
+	}
+	dlg.SetTitle("Propriedades")
+	dlg.SetLayout(walk.NewVBoxLayout())
+
+	titleLabel, _ := walk.NewLabel(dlg)
+	titleLabel.SetText("Propriedades de: " + info.Name())
+	font, _ := walk.NewFont("Segoe UI", 11, walk.FontBold)
+	titleLabel.SetFont(font)
+
+	dlg.Children().Add(titleLabel)
+
+	for _, line := range lines {
+		lbl, _ := walk.NewLabel(dlg)
+		lbl.SetText(line)
+		dlg.Children().Add(lbl)
+	}
+
+	okBtn, _ := walk.NewPushButton(dlg)
+	okBtn.SetText("OK")
+	okBtn.Clicked().Attach(func() { dlg.Close(walk.DlgCmdOK) })
+
+	dlg.Children().Add(okBtn)
+
+	dlg.SetDefaultButton(okBtn)
+
+	w := calcDialogWidth(info.Name())
+	if w < 500 {
+		w = 500
+	}
+	h := 300
+	dlg.SetMinMaxSize(walk.Size{Width: w, Height: 0}, walk.Size{Width: w, Height: 0})
+	dlg.RequestLayout()
+	mwBounds := mw.Bounds()
+	dlg.SetBounds(walk.Rectangle{
+		X:      mwBounds.X + (mwBounds.Width-w)/2,
+		Y:      mwBounds.Y + (mwBounds.Height-h)/2,
+		Width:  w,
+		Height: h,
+	})
+
+	dlg.Run()
+}
+
+func countDirContents(path string) (files, folders int) {
+	entries, err := os.ReadDir(path)
+	if err != nil {
+		return
+	}
+	for _, e := range entries {
+		if e.IsDir() {
+			folders++
+		} else {
+			files++
+		}
+	}
+	return
 }
 
 func (mw *GarqMainWindow) cycleSortMode() {
