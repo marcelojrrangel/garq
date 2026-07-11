@@ -1361,18 +1361,7 @@ func (mw *GarqMainWindow) showProperties() {
 		return
 	}
 
-	var lines []string
-	lines = append(lines, fmt.Sprintf("Nome: %s", info.Name()))
-	lines = append(lines, fmt.Sprintf("Caminho: %s", entry.Path))
-	if info.IsDir() {
-		lines = append(lines, "Tipo: Pasta")
-		fc, dc := countDirContents(entry.Path)
-		lines = append(lines, fmt.Sprintf("Conteúdo: %d arquivo(s), %d pasta(s)", fc, dc))
-	} else {
-		lines = append(lines, fmt.Sprintf("Tipo: %s", filepath.Ext(entry.Name)))
-		lines = append(lines, fmt.Sprintf("Tamanho: %s", formatSize(info.Size())))
-	}
-	lines = append(lines, fmt.Sprintf("Modificado: %s", info.ModTime().Format("02/01/2006 15:04:05")))
+	isDir := info.IsDir()
 
 	dlg, err := walk.NewDialog(mw.MainWindow)
 	if err != nil {
@@ -1387,10 +1376,39 @@ func (mw *GarqMainWindow) showProperties() {
 	titleLabel.SetFont(font)
 	dlg.Children().Add(titleLabel)
 
-	for _, line := range lines {
+	addLabel := func(text string) *walk.Label {
 		lbl, _ := walk.NewLabel(dlg)
-		lbl.SetText(line)
+		lbl.SetText(text)
 		dlg.Children().Add(lbl)
+		return lbl
+	}
+
+	addLabel(fmt.Sprintf("Nome: %s", info.Name()))
+	addLabel(fmt.Sprintf("Caminho: %s", entry.Path))
+	var contentLabel *walk.Label
+	if isDir {
+		addLabel("Tipo: Pasta")
+		contentLabel = addLabel(" Conteúdo: Contando...")
+	} else {
+		addLabel(fmt.Sprintf("Tipo: %s", filepath.Ext(entry.Name)))
+		addLabel(fmt.Sprintf("Tamanho: %s", formatSize(info.Size())))
+	}
+	addLabel(fmt.Sprintf("Modificado: %s", info.ModTime().Format("02/01/2006 15:04:05")))
+
+	closed := false
+	dlg.Closing().Attach(func(canceled *bool, reason walk.CloseReason) {
+		closed = true
+	})
+	if isDir {
+		go func() {
+			fc, dc := countDirContents(entry.Path)
+			mw.Synchronize(func() {
+				if closed {
+					return
+				}
+				contentLabel.SetText(fmt.Sprintf("Conteúdo: %d arquivo(s), %d pasta(s)", fc, dc))
+			})
+		}()
 	}
 
 	okBtn, _ := walk.NewPushButton(dlg)
