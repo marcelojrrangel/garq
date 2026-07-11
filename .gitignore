@@ -19,6 +19,8 @@ logs/
 
 # Build artifacts (Garq)
 *.exe
+*.dll
+*.syso
 *.db
 garq.exe
 garq.db
@@ -34,3 +36,6 @@ Thumbs.db
 .aiox-core/local/
 .claude/settings.local.json
 .aiox/install-log.txt
+
+# AIOX subfolder
+garq_ia/

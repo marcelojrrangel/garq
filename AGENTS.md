@@ -55,3 +55,21 @@ Single table `jobs` (id, type, payload, status, progress, error). WAL journal mo
 ## 7z CLI
 
 Searches in order: `GARQ_7Z_PATH` env → bundled `<app>/7z/7z.exe` → `%PATH%` → standard install paths. No CGO SDK binding.
+
+---
+
+## AIOX Framework
+
+This project uses **AIOX** (AI Orchestration eXperience) for AI-assisted development:
+
+| Component | Location |
+|-----------|----------|
+| Framework core | `.aiox-core/` |
+| OpenCode integration | `.opencode/` |
+| Agent activation | `.agent/workflows/` |
+| AIOX config | `opencode.json` |
+| Agent reference | `AGENTS_ai.md` |
+
+**Commands:** `/aiox-help`, `/aiox-init`, `/aiox-story`, `/aiox-workflow`, `/loop-architect`
+
+**Agents:** `@aiox-dev`, `@aiox-qa`, `@aiox-architect`, `@aiox-pm`, etc. — 12 specialized agents available via `.opencode/`.

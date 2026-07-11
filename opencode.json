@@ -1,0 +1,249 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "instructions": [
+    ".opencode/AGENTS.md"
+  ],
+  "agent": {
+    "aiox-master": {
+      "description": "👑 Orion — Master Orchestrator & Framework Developer. Use for comprehensive cross-domain expertise, framework component creation, workflow orchestration.",
+      "mode": "subagent",
+      "color": "#FFD700",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "ask",
+          "git push": "deny",
+          "npm *": "allow",
+          "node *": "allow",
+          "npx *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-orchestrator": {
+      "description": "🔄 Workflow Orchestrator & Team Coordinator. Use for multi-agent workflow execution and development cycle orchestration.",
+      "mode": "subagent",
+      "color": "#4A9EFF",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "ask",
+          "git push": "deny",
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-analyst": {
+      "description": "🔍 Atlas — Business Analyst. Use for market research, competitive analysis, user research, brainstorming, and feasibility studies.",
+      "mode": "subagent",
+      "color": "#9B59B6",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-pm": {
+      "description": "📋 Morgan — Product Manager. Use for PRD creation, epic management, product strategy, feature prioritization, and roadmap planning.",
+      "mode": "subagent",
+      "color": "#E67E22",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-architect": {
+      "description": "🏛️ Aria — System Architect. Use for system architecture, tech stack selection, API design, security architecture, and deployment strategy.",
+      "mode": "subagent",
+      "color": "#2ECC71",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-ux": {
+      "description": "🎨 Uma — UX/UI Designer & Design System Architect. Use for user research, wireframes, design systems, and token extraction.",
+      "mode": "subagent",
+      "color": "#E91E63",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-sm": {
+      "description": "🌊 River — Scrum Master. Use for user story creation, story validation, acceptance criteria, sprint planning, and backlog grooming.",
+      "mode": "subagent",
+      "color": "#00BCD4",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "allow",
+          "git push": "deny",
+          "npm *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-dev": {
+      "description": "💻 Dex — Full Stack Developer. Use for code implementation, debugging, refactoring, story development, and autonomous builds.",
+      "mode": "subagent",
+      "color": "#3498DB",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "allow",
+          "git push": "deny",
+          "npm *": "allow",
+          "npx *": "allow",
+          "node *": "allow",
+          "dotnet *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-qa": {
+      "description": "✅ Quinn — Test Architect & Quality Advisor. Use for code review, quality gates, test architecture, risk assessment, and quality advisory.",
+      "mode": "subagent",
+      "color": "#27AE60",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "npx *": "allow",
+          "node *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-po": {
+      "description": "🎯 Pax — Product Owner. Use for backlog management, story refinement, acceptance criteria, sprint planning, and prioritization.",
+      "mode": "subagent",
+      "color": "#F39C12",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "ask",
+          "git push": "deny",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-data-engineer": {
+      "description": "📊 Dara — Database Architect & Operations Engineer. Use for database design, schema, migrations, query optimization, and data modeling.",
+      "mode": "subagent",
+      "color": "#1ABC9C",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "npm *": "allow",
+          "npx *": "allow",
+          "node *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-devops": {
+      "description": "⚡ Gage — DevOps & Git Ops Specialist. Repository ops, CI/CD, quality gates, push. ONLY agent authorized to push to remote.",
+      "mode": "subagent",
+      "color": "#E74C3C",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "glob": "allow",
+        "grep": "allow",
+        "bash": {
+          "git *": "allow",
+          "npm *": "allow",
+          "npx *": "allow",
+          "node *": "allow",
+          "gh *": "allow",
+          "*": "ask"
+        }
+      }
+    },
+    "aiox-squad-creator": {
+      "description": "🏗️ Craft — Squad Creator. Builder archetype. Use to create, validate, publish and manage squads",
+      "mode": "subagent",
+      "color": "#888888",
+      "permission": {
+        "read": "allow",
+        "edit": "allow",
+        "bash": {
+          "*": "ask"
+        }
+      }
+    }
+  },
+  "command": {
+    "aiox-help": {
+      "description": "Show AIOX framework help — agent list, commands, and key resources",
+      "agent": "aiox-master",
+      "template": "Show the AIOX help overview. Include: 1. Available AIOX agents and their roles (list all 12). 2. How to @-mention an agent: @aiox-dev, @aiox-qa, etc. 3. Available custom commands: /aiox-workflow, /aiox-story, /aiox-init. 4. Where to find tasks: .aiox-core/development/tasks/. 5. Where to find workflows: .aiox-core/development/workflows/. 6. Key convention: all agent commands use * prefix. 7. The core config file: .aiox-core/core-config.yaml. Read .opencode/AGENTS.md for the full reference."
+    },
+    "aiox-init": {
+      "description": "Initialize or verify AIOX framework installation",
+      "agent": "aiox-master",
+      "template": "Initialize AIOX in the current project: 1. Read .aiox-core/core-config.yaml to check if already initialized. 2. If not initialized, guide the user to run npx aiox-core install. 3. If initialized, show current config: project type, version, user profile, IDE configs. 4. Check .aiox-core/ directory structure is complete. 5. Check .agent/workflows/ has all agent activation files. 6. Run health check: verify Node.js >= 18, npm >= 9. 7. Show summary of findings and recommendations."
+    },
+    "aiox-story": {
+      "description": "Create, manage, or validate AIOX user stories",
+      "agent": "aiox-sm",
+      "template": "Manage AIOX user stories. Usage: /aiox-story create --from <prd|epic> --name \"title\" — read PRD from docs/prd/ and architecture from docs/architecture/, draft story using .aiox-core/development/tasks/sm-create-next-story.md. /aiox-story validate <file> — run validation checklist. /aiox-story list — scan docs/stories/. Default story location from devStoryLocation in .aiox-core/core-config.yaml."
+    },
+    "aiox-workflow": {
+      "description": "Run an AIOX development workflow (development-cycle, qa-loop, spec-pipeline, etc.)",
+      "agent": "aiox-orchestrator",
+      "template": "Execute an AIOX workflow. Usage: /aiox-workflow <name> [--story <path>] [--epic <name>]. Available: development-cycle, qa-loop, spec-pipeline, greenfield-fullstack, greenfield-service, greenfield-ui, brownfield-fullstack, brownfield-discovery, auto-worktree, story-development-cycle. Load YAML from .aiox-core/development/workflows/<name>.yaml, parse phases, execute sequentially with proper agent assignments, handle errors per workflow definition, persist state to .aiox/workflow-state/."
+    },
+    "loop-architect": {
+      "description": "Ativa o Loop Engineering — ciclo auto-corretivo com roadmap, testes e lessons learned",
+      "agent": "aiox-dev",
+      "template": "Load the loop-engineering skill using skill tool. Then: 1. Check for roadmap.md, lessons.md, state.json in project root — create if missing. 2. Read current state and next task. 3. Execute the loop: analyze → code → test → self-correct → update state. 4. Run tests after every change. 5. If 2 consecutive attempts fail on same code, halt and ask user."
+    }
+  }
+}
