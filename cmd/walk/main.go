@@ -1221,14 +1221,13 @@ func (mw *GarqMainWindow) pasteClipboard() {
 		return
 	}
 
-	// Enfileira via worker e abre dialog de progresso
 	jobType := "copy"
+	var jobID int64
 	if isCut {
 		jobType = "move"
-	}
-	jobID, err := mw.api.AddCopyJob(paths, dest, "replace")
-	if isCut {
 		jobID, err = mw.api.AddMoveJob(paths, dest, "replace")
+	} else {
+		jobID, err = mw.api.AddCopyJob(paths, dest, "replace")
 	}
 	if err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
