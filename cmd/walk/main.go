@@ -359,37 +359,33 @@ func main() {
 
 	// Drag & drop
 	mw.DropFiles().Attach(func(files []string) {
+		if len(files) == 0 {
+			mw.statusLabel.SetText("Nenhum arquivo solto")
+			return
+		}
 		tp := mw.activeTab()
 		if tp == nil {
+			mw.statusLabel.SetText("Nenhuma aba ativa")
 			return
 		}
 		dest := tp.currentPath()
 		if dest == "" {
+			mw.statusLabel.SetText("Destino inválido")
 			return
 		}
-		count := 0
 		for _, src := range files {
-			baseName := filepath.Base(src)
-			dst := filepath.Join(dest, baseName)
-			info, err := os.Stat(src)
-			if err != nil {
-				continue
-			}
-			if info.IsDir() {
-				if err := copyPath(src, dst); err == nil {
-					count++
-				}
-			} else {
-				if src == dst {
-					dst = getCopyPath(dest, baseName)
-				}
-				if err := copyPath(src, dst); err == nil {
-					count++
-				}
+			if filepath.Dir(src) == dest {
+				mw.statusLabel.SetText("Origem e destino iguais")
+				return
 			}
 		}
-		mw.statusLabel.SetText(fmt.Sprintf("Importado(s) %d item(s)", count))
-		mw.navigateTo(dest)
+		jobID, err := mw.api.AddCopyJob(files, dest, "replace")
+		if err != nil {
+			mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar cópia: %v", err))
+			return
+		}
+		mw.statusLabel.SetText(fmt.Sprintf("⏳ Iniciando cópia de %d item(s)...", len(files)))
+		mw.openProgressDialog(jobID, "copy")
 	})
 
 	// Navega para o primeiro drive ao iniciar
@@ -1507,36 +1503,3 @@ func countDirContents(path string) (files, folders int) {
 	return
 }
 
-func copyPath(src, dst string) error {
-	return filepath.Walk(src, func(path string, info os.FileInfo, err error) error {
-		if err != nil {
-			return err
-		}
-		relPath, _ := filepath.Rel(src, path)
-		dstPath := filepath.Join(dst, relPath)
-		if info.IsDir() {
-			return os.MkdirAll(dstPath, info.Mode())
-		}
-		data, err := os.ReadFile(path)
-		if err != nil {
-			return err
-		}
-		return os.WriteFile(dstPath, data, info.Mode())
-	})
-}
-
-func getCopyPath(dir, name string) string {
-	ext := filepath.Ext(name)
-	base := name[:len(name)-len(ext)]
-	dst := filepath.Join(dir, name)
-	if _, err := os.Stat(dst); os.IsNotExist(err) {
-		return dst
-	}
-	for i := 1; ; i++ {
-		newName := fmt.Sprintf("%s - Cópia(%d)%s", base, i, ext)
-		dst = filepath.Join(dir, newName)
-		if _, err := os.Stat(dst); os.IsNotExist(err) {
-			return dst
-		}
-	}
-}
