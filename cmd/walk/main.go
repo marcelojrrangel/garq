@@ -4,7 +4,6 @@ import (
 	"fmt"
 	"log"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -74,7 +73,6 @@ func (tp *TabPane) currentPath() string {
 // GarqMainWindow é a janela principal.
 type GarqMainWindow struct {
 	*walk.MainWindow
-	api         *api.API
 	service     *service.Service
 	navTree     *walk.TreeView
 	tabWidget   *walk.TabWidget
@@ -273,7 +271,6 @@ func main() {
 	buildSectionedNavTree(navModel)
 
 	mw := &GarqMainWindow{
-		api:      apiInstance,
 		service:  svc,
 		navModel: navModel,
 	}
@@ -382,7 +379,7 @@ func main() {
 				return
 			}
 		}
-		jobID, err := mw.api.AddCopyJob(files, dest, "replace")
+		jobID, err := mw.service.Copy(files, dest, "replace")
 		if err != nil {
 			mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar cópia: %v", err))
 			return
@@ -393,7 +390,7 @@ func main() {
 
 	// Navega para o primeiro drive ao iniciar
 	go func() {
-		roots, err := mw.api.ListRoots()
+		roots, err := mw.service.ListRoots()
 		if err != nil {
 			log.Printf("Erro ao listar drives: %v", err)
 			return
@@ -807,8 +804,7 @@ func (mw *GarqMainWindow) activateSelected() {
 		if e.IsDir {
 			mw.navigateTo(e.Path)
 		} else {
-			cmd := exec.Command("cmd", "/c", "start", "", e.Path)
-			cmd.Start()
+			mw.service.OpenFile(e.Path)
 		}
 	}
 }
@@ -830,17 +826,16 @@ func (mw *GarqMainWindow) navigateTabTo(tp *TabPane, path string) {
 		mw.statusLabel.SetText("Carregando...")
 	})
 
-	entries, err := mw.api.ListDirectory(path)
+	entries, err := mw.service.ListDirectory(path)
 	if err != nil {
 		log.Printf("navigateTabTo erro ListDirectory: %v", err)
 		mw.Synchronize(func() { mw.statusLabel.SetText(fmt.Sprintf("Erro: %v", err)) })
 		return
 	}
 
-	var fileEntries []FileEntry
+	fileEntries := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {
-		mt, _ := time.Parse("2006-01-02 15:04:05", e.ModTime)
-		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: mt})
+		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
 	}
 
 	if len(tp.history) == 0 || tp.history[len(tp.history)-1] != path {
@@ -908,16 +903,15 @@ func (mw *GarqMainWindow) navigateTabDirect(tp *TabPane, path string) {
 		mw.statusLabel.SetText("Carregando...")
 	})
 
-	entries, err := mw.api.ListDirectory(path)
+	entries, err := mw.service.ListDirectory(path)
 	if err != nil {
 		mw.Synchronize(func() { mw.statusLabel.SetText(fmt.Sprintf("Erro: %v", err)) })
 		return
 	}
 
-	var fileEntries []FileEntry
+	fileEntries := make([]FileEntry, 0, len(entries))
 	for _, e := range entries {
-		mt, _ := time.Parse("2006-01-02 15:04:05", e.ModTime)
-		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: mt})
+		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: e.ModTime})
 	}
 
 	title := tabTitle(path)
@@ -1155,7 +1149,7 @@ func (mw *GarqMainWindow) createNewFolder() {
 		mw.statusLabel.SetText("O nome não pode estar vazio")
 		return
 	}
-	if err := os.MkdirAll(filepath.Join(currentPath, name), 0755); err != nil {
+	if err := mw.service.CreateFolder(currentPath, name); err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao criar pasta: %v", err))
 		return
 	}
@@ -1169,7 +1163,7 @@ func (mw *GarqMainWindow) cutSelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado para recortar")
 		return
 	}
-	walk.Clipboard().SetText("CUT:\n" + strings.Join(paths, "\n"))
+	mw.service.SetClipboard("cut", paths)
 	mw.statusLabel.SetText(fmt.Sprintf("Recortado(s) %d item(s)", len(paths)))
 }
 
@@ -1179,7 +1173,7 @@ func (mw *GarqMainWindow) copySelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado para copiar")
 		return
 	}
-	walk.Clipboard().SetText("COPY:\n" + strings.Join(paths, "\n"))
+	mw.service.SetClipboard("copy", paths)
 	mw.statusLabel.SetText(fmt.Sprintf("Copiado(s) %d item(s)", len(paths)))
 }
 
@@ -1188,49 +1182,17 @@ func (mw *GarqMainWindow) pasteClipboard() {
 	if tp == nil {
 		return
 	}
-	text, err := walk.Clipboard().Text()
-	if err != nil || text == "" {
-		mw.statusLabel.SetText("Nada para colar")
-		return
-	}
-	lines := strings.SplitN(text, "\n", 2)
-	if len(lines) < 2 {
-		mw.statusLabel.SetText("Área de transferência inválida")
-		return
-	}
-	isCut := lines[0] == "CUT:"
-	var paths []string
-	for _, p := range strings.Split(lines[1], "\n") {
-		if p = strings.TrimSpace(p); p != "" {
-			paths = append(paths, p)
-		}
-	}
-	if len(paths) == 0 {
-		mw.statusLabel.SetText("Nada para colar")
-		return
-	}
 	dest := tp.currentPath()
 	if dest == "" {
 		mw.statusLabel.SetText("Nenhuma pasta de destino")
 		return
 	}
-
-	jobType := "copy"
-	var jobID int64
-	if isCut {
-		jobType = "move"
-		jobID, err = mw.api.AddMoveJob(paths, dest, "replace")
-	} else {
-		jobID, err = mw.api.AddCopyJob(paths, dest, "replace")
-	}
+	jobID, jobType, err := mw.service.Paste(dest)
 	if err != nil {
-		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
+		mw.statusLabel.SetText(fmt.Sprintf("Nada para colar: %v", err))
 		return
 	}
-	if isCut {
-		walk.Clipboard().Clear()
-	}
-	mw.statusLabel.SetText(fmt.Sprintf("⏳ Iniciando %s de %d item(s)...", jobType, len(paths)))
+	mw.statusLabel.SetText(fmt.Sprintf("⏳ Iniciando %s...", jobType))
 	go func() {
 		mw.Synchronize(func() {
 			mw.openProgressDialog(jobID, jobType)
@@ -1257,8 +1219,7 @@ func (mw *GarqMainWindow) renameSelected() {
 	if !ok || newName == "" || newName == entry.Name {
 		return
 	}
-	newPath := filepath.Join(filepath.Dir(entry.Path), newName)
-	if err := os.Rename(entry.Path, newPath); err != nil {
+	if err := mw.service.Rename(entry.Path, newName); err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao renomear: %v", err))
 	} else {
 		mw.statusLabel.SetText(fmt.Sprintf("Renomeado para: %s", newName))
@@ -1272,7 +1233,7 @@ func (mw *GarqMainWindow) deleteSelected() {
 		mw.statusLabel.SetText("Nenhum item selecionado")
 		return
 	}
-	if err := RecycleItems(paths); err != nil {
+	if err := mw.service.DeleteToRecycle(paths); err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao mover para lixeira: %v", err))
 		return
 	}
@@ -1296,7 +1257,7 @@ func (mw *GarqMainWindow) deleteSelectedPermanently() {
 		mw.statusLabel.SetText("Exclusão cancelada")
 		return
 	}
-	jobID, err := mw.api.AddDeleteJob(paths)
+	jobID, err := mw.service.Delete(paths)
 	if err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
 		return
