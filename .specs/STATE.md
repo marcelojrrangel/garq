@@ -11,16 +11,18 @@
 | AD-05 | `main.go` split is a pure mechanical move (no behavior changes) | Minimizes risk; each file gets `package main`; the split happens after service migration so file ops are already thin | 2026-07-11 |
 | AD-06 | Clipboard protocol becomes a typed struct in service, not a string format | `"CUT:\n" + paths` is error-prone; `ClipboardOp{Op: "cut", Paths: []string}` is typed and validated | 2026-07-11 |
 | AD-07 | UI-only changes (sort indicators, empty state, disabled states, focus) gate on build+vet only | Go GUI code is untestable without a running app instance; the service layer carries the unit-testable logic | 2026-07-11 |
+| AD-08 | `internal/shell` package extracted from `cmd/walk/recycle_windows.go` | Avoids import cycle: `internal/service` cannot import `cmd/walk` (package main); makes recycle logic reusable by `cmd/app` | 2026-07-11 |
+| AD-09 | `service.InitDB`, `service.StartWorkerPool`, `service.NewFromDB` helpers added | Allows `cmd/walk` to bootstrap DB and workers without importing `db`, `worker`, `compress`, or `copy` directly | 2026-07-11 |
 
 ## Handoff
 
 **Feature**: front-end-melhorias
 **Branch**: `feature/front-end-melhorias`
-**Status**: Planning complete — spec, design, and tasks approved; ready for Execute (Phase 1)
-**Phase / Task**: Phase 1, T1 (next)
-**Completed**: spec.md, design.md, tasks.md
-**In progress**: None (planning done, execution not started)
-**Next step**: Begin Execute — dispatch Worker 1 for Phase 1 (T1–T4: P0 quick fixes)
+**Status**: Phase 2 complete — service layer implemented; ready for Phase 3
+**Phase / Task**: Phase 3, T11 (next)
+**Completed**: T1–T10 (Phase 1 + Phase 2)
+**In progress**: None
+**Next step**: Dispatch Worker 3 for Phase 3 (T11–T17: UI split + UX polish)
 **Blockers**: None
-**Uncommitted files**: `.specs/` directory (spec, design, tasks) — commit before starting execution
-**Commit range**: `9ff4875` (base; before feature work)
+**Uncommitted files**: `.specs/STATE.md` update
+**Commit range**: `9ff4875..11b2674`
