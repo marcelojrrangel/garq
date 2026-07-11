@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log"
 	"time"
-	"unsafe"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
@@ -38,7 +37,7 @@ var (
 )
 
 func pbSetState(pb *walk.ProgressBar, state uintptr) {
-	procSendMsg.Call(uintptr(unsafe.Pointer(pb.Handle())), pbmSetState, state, 0)
+	procSendMsg.Call(uintptr(pb.Handle()), pbmSetState, state, 0)
 }
 
 // ---------------------------------------------------------------------------

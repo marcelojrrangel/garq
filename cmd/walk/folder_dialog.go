@@ -35,7 +35,7 @@ func showFolderDialog(owner *GarqMainWindow, title, initialPath string) string {
 	displayBuf := make([]uint16, 260)
 
 	bi := &browseInfoW{
-		HwndOwner:      uintptr(unsafe.Pointer(owner.MainWindow.Handle())),
+		HwndOwner:      uintptr(owner.MainWindow.Handle()),
 		PSZDisplayName: uintptr(unsafe.Pointer(&displayBuf[0])),
 		LpszTitle:      titlePtr,
 		UlFlags:        bifReturnOnlyFSDirs | bifNewDialogStyle,
