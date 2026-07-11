@@ -1295,17 +1295,24 @@ func (mw *GarqMainWindow) deleteSelectedPermanently() {
 		mw.statusLabel.SetText("Nenhum item selecionado")
 		return
 	}
-	count := 0
-	for _, p := range paths {
-		if err := os.RemoveAll(p); err == nil {
-			count++
-		}
+	result := walk.MsgBox(mw.MainWindow, "Excluir permanentemente",
+		fmt.Sprintf("Deseja excluir permanentemente %d item(s)? Esta ação não pode ser desfeita.", len(paths)),
+		walk.MsgBoxYesNo|walk.MsgBoxIconWarning|walk.MsgBoxDefButton2)
+	if result != walk.DlgCmdYes {
+		mw.statusLabel.SetText("Exclusão cancelada")
+		return
 	}
-	mw.statusLabel.SetText(fmt.Sprintf("✗ %d item(s) excluído(s) permanentemente", count))
-	tp := mw.activeTab()
-	if tp != nil {
-		mw.navigateTo(tp.currentPath())
+	jobID, err := mw.api.AddDeleteJob(paths)
+	if err != nil {
+		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
+		return
 	}
+	mw.statusLabel.SetText(fmt.Sprintf("⏳ Iniciando exclusão de %d item(s)...", len(paths)))
+	go func() {
+		mw.Synchronize(func() {
+			mw.openProgressDialog(jobID, "delete")
+		})
+	}()
 }
 
 func (mw *GarqMainWindow) sortTab(tp *TabPane) {
