@@ -15,12 +15,7 @@ import (
 	. "github.com/lxn/walk/declarative"
 	"github.com/lxn/win"
 
-	"garq/compress"
-	"garq/internal/api"
-	copyimpl "garq/internal/copy"
-	"garq/internal/db"
 	"garq/internal/service"
-	"garq/internal/worker"
 )
 
 func init() {
@@ -255,16 +250,14 @@ func main() {
 		dbPath = envPath
 	}
 
-	dbConn, err := db.InitDB(dbPath)
+	dbConn, err := service.InitDB(dbPath)
 	if err != nil {
 		log.Fatalf("Erro ao inicializar banco: %v", err)
 	}
 	defer dbConn.Close()
 
-	store := &db.DBStore{DB: dbConn}
-	worker.StartWorkerPool(4, store, compress.CLIAdapter{}, copyimpl.CopierAdapter{})
-	apiInstance := api.New(dbConn)
-	svc := service.New(apiInstance)
+	service.StartWorkerPool(dbConn)
+	svc := service.NewFromDB(dbConn)
 	log.Printf("Banco inicializado: %s", dbPath)
 
 	navModel := &NavTreeModel{}
