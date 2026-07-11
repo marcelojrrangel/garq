@@ -15,11 +15,8 @@ func InitDB(path string) (*sql.DB, error) {
 	if _, err := db.Exec(string(mustReadSchema())); err != nil {
 		return nil, err
 	}
-	// Limpa todos os jobs na inicialização para começar limpo
-	if _, err := db.Exec("DELETE FROM jobs"); err != nil {
-		return nil, err
-	}
-	_, _ = db.Exec("DELETE FROM sqlite_sequence WHERE name='jobs'")
+	// Mark jobs that were running as failed on crash recovery
+	_, _ = db.Exec("UPDATE jobs SET status='failed', error='service restarted' WHERE status='running'")
 	return db, nil
 }
 

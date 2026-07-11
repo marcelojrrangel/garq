@@ -18,6 +18,8 @@ import (
 	"strings"
 )
 
+var progressRe = regexp.MustCompile(`(\d{1,3})%`)
+
 type ProgressFunc func(progress float64)
 
 func Compress(src, dest string) error {
@@ -32,8 +34,19 @@ func CompressManyCtx(ctx context.Context, sources []string, dest string, progres
 	if len(sources) == 0 {
 		return errors.New("sources cannot be empty")
 	}
+	cleanSources := make([]string, 0, len(sources))
+	for _, s := range sources {
+		if strings.HasPrefix(s, "@") || strings.HasPrefix(s, "-") {
+			return fmt.Errorf("invalid source path (starts with '@' or '-'): %s", s)
+		}
+		clean := filepath.Clean(s)
+		if !filepath.IsAbs(clean) {
+			return fmt.Errorf("source path must be absolute: %s", s)
+		}
+		cleanSources = append(cleanSources, clean)
+	}
 	args := []string{"a", "-t7z", "-mx=5", "-bsp1", dest}
-	args = append(args, sources...)
+	args = append(args, cleanSources...)
 	return run7zCtx(ctx, progressCb, args...)
 }
 
@@ -42,15 +55,28 @@ func Extract(archive, dest string) error {
 }
 
 func ExtractCtx(ctx context.Context, archive, dest string, progressCb ProgressFunc) error {
-	return run7zCtx(ctx, progressCb, "x", "-bsp1", archive, "-o"+dest, "-y")
+	if strings.HasPrefix(archive, "@") || strings.HasPrefix(archive, "-") {
+		return fmt.Errorf("invalid archive path (starts with '@' or '-'): %s", archive)
+	}
+	if strings.HasPrefix(dest, "-") {
+		return fmt.Errorf("invalid destination path (starts with '-'): %s", dest)
+	}
+	cleanArchive := filepath.Clean(archive)
+	cleanDest := filepath.Clean(dest)
+	if !filepath.IsAbs(cleanArchive) {
+		return fmt.Errorf("archive path must be absolute: %s", archive)
+	}
+	if !filepath.IsAbs(cleanDest) {
+		return fmt.Errorf("destination path must be absolute: %s", dest)
+	}
+	return run7zCtx(ctx, progressCb, "x", "-bsp1", cleanArchive, "-o"+cleanDest, "-y")
 }
 
 func parseProgress(line string) (float64, bool) {
 	if !strings.Contains(line, "%") {
 		return 0, false
 	}
-	re := regexp.MustCompile(`(\d{1,3})%`)
-	matches := re.FindStringSubmatch(line)
+	matches := progressRe.FindStringSubmatch(line)
 	if len(matches) >= 2 {
 		pct, err := strconv.Atoi(matches[1])
 		if err == nil && pct >= 0 && pct <= 100 {

@@ -1,6 +1,7 @@
 package api
 
 import (
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -8,15 +9,6 @@ import (
 	"sort"
 	"strings"
 )
-
-type fsItem struct {
-	Name    string
-	Path    string
-	IsDir   bool
-	Size    int64
-	ModTime string
-	Mode    string
-}
 
 func (a *API) ListRoots() ([]string, error) {
 	fmt.Println("ListRoots called")
@@ -37,20 +29,27 @@ func (a *API) ListRoots() ([]string, error) {
 	return roots, nil
 }
 
-func (a *API) ListDirectory(path string) ([]map[string]any, error) {
-	entries, err := os.ReadDir(path)
+func (a *API) ListDirectory(path string) ([]DirEntryDTO, error) {
+	cleanPath := filepath.Clean(path)
+	if strings.Contains(cleanPath, "..") {
+		return nil, errors.New("invalid path")
+	}
+	if !filepath.IsAbs(cleanPath) {
+		return nil, errors.New("path must be absolute")
+	}
+	entries, err := os.ReadDir(cleanPath)
 	if err != nil {
 		return nil, err
 	}
 
-	items := make([]fsItem, 0, len(entries))
+	items := make([]DirEntryDTO, 0, len(entries))
 	for _, e := range entries {
 		info, err := e.Info()
 		if err != nil {
 			continue
 		}
 		fullPath := filepath.Join(path, e.Name())
-		items = append(items, fsItem{
+		items = append(items, DirEntryDTO{
 			Name:    e.Name(),
 			Path:    fullPath,
 			IsDir:   e.IsDir(),
@@ -67,16 +66,5 @@ func (a *API) ListDirectory(path string) ([]map[string]any, error) {
 		return strings.ToLower(items[i].Name) < strings.ToLower(items[j].Name)
 	})
 
-	out := make([]map[string]any, 0, len(items))
-	for _, it := range items {
-		out = append(out, map[string]any{
-			"name":     it.Name,
-			"path":     it.Path,
-			"is_dir":   it.IsDir,
-			"size":     it.Size,
-			"mod_time": it.ModTime,
-			"mode":     it.Mode,
-		})
-	}
-	return out, nil
+	return items, nil
 }

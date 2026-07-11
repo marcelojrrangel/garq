@@ -8,6 +8,11 @@ import (
 	"sync"
 )
 
+// httpPort is used by the internal debug HTTP server.
+// Note: cmd/app/ also starts an HTTP server on :8080 via http.Server directly.
+// These two servers serve different purposes — the internal one serves /api/roots and
+// /api/directory for development/debug, while cmd/app/ serves job-related endpoints.
+// They coexist on different ports and do not conflict.
 const httpPort = 19876
 
 var (
@@ -36,9 +41,16 @@ func StartHTTPServer(a *API) {
 		mux.HandleFunc("/api/roots", handleRootsHandler(a))
 		mux.HandleFunc("/api/directory", handleDirectoryHandler(a))
 
-		addr := fmt.Sprintf("127.0.0.1:%d", httpPort)
-		fmt.Printf("HTTP API server starting on %s\n", addr)
-		go http.ListenAndServe(addr, mux)
+		a.HTTPServer = &http.Server{
+			Addr:    fmt.Sprintf("127.0.0.1:%d", httpPort),
+			Handler: mux,
+		}
+		fmt.Printf("HTTP API server starting on %s\n", a.HTTPServer.Addr)
+		go func() {
+			if err := a.HTTPServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+				fmt.Printf("HTTP server error: %v\n", err)
+			}
+		}()
 	})
 }
 

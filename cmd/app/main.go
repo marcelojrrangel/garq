@@ -8,7 +8,9 @@ import (
 	"os/signal"
 	"syscall"
 
+	"garq/compress"
 	"garq/internal/api"
+	copyimpl "garq/internal/copy"
 	"garq/internal/db"
 	"garq/internal/worker"
 )
@@ -23,7 +25,8 @@ func main() {
 	defer dbConn.Close()
 
 	// Start worker pool
-	worker.StartWorkerPool(4, dbConn)
+	store := &db.DBStore{DB: dbConn}
+	worker.StartWorkerPool(4, store, compress.CLIAdapter{}, copyimpl.CopierAdapter{})
 	bindAPI := &api.API{DB: dbConn}
 
 	// Minimal HTTP API for demonstration (replace with Wails bindings)

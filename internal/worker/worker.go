@@ -2,142 +2,155 @@ package worker
 
 import (
 	"context"
-	"database/sql"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
 	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 	"time"
-
-	"garq/compress"
-	copyimpl "garq/internal/copy"
-	"garq/internal/db"
 )
+
+// Compressor compresses and extracts archives with progress reporting.
+type Compressor interface {
+	CompressManyCtx(ctx context.Context, sources []string, dest string, progressCb func(float64)) error
+	ExtractCtx(ctx context.Context, archive, dest string, progressCb func(float64)) error
+}
+
+// FileCopier copies a single file from src to destDir.
+type FileCopier interface {
+	CopyFile(src, destDir string) error
+}
+
+// JobStore persists and retrieves job records.
+type JobStore interface {
+	EnqueueJob(typ string, payload any) (int64, error)
+	FetchPendingJob() (int64, string, string, error)
+	UpdateJobStatus(id int64, status string, progress float64, errMsg string) error
+	GetJobPayload(id int64) (map[string]any, error)
+}
+
+type jobState struct {
+	cancel context.CancelFunc
+	mu     sync.Mutex
+	cond   *sync.Cond
+	paused bool
+}
 
 var (
-	mu       sync.Mutex
-	jobs     = make(map[int64]context.CancelFunc)
-	pauseChs = make(map[int64]chan struct{})
+	mu     sync.Mutex
+	states = make(map[int64]*jobState)
 )
 
-func StartWorkerPool(n int, conn *sql.DB) {
+// StartWorkerPool launches n worker goroutines that process jobs via the given dependencies.
+func StartWorkerPool(n int, store JobStore, compressor Compressor, copier FileCopier) {
 	for i := 0; i < n; i++ {
-		go workerLoop(i, conn)
+		go workerLoop(i, store, compressor, copier)
 	}
 }
 
 func CancelJob(jobID int64) {
 	mu.Lock()
-	defer mu.Unlock()
-	if cancel, ok := jobs[jobID]; ok {
-		cancel()
-		delete(jobs, jobID)
-	}
-	// Desbloqueia se estiver pausado
-	if ch, ok := pauseChs[jobID]; ok {
-		select {
-		case ch <- struct{}{}:
-		default:
-		}
-		delete(pauseChs, jobID)
+	js, ok := states[jobID]
+	mu.Unlock()
+	if ok {
+		js.cancel()
+		js.mu.Lock()
+		js.paused = false
+		js.cond.Broadcast()
+		js.mu.Unlock()
 	}
 }
 
-// PauseJob suspende a execução de um job. Bloqueia o worker até ResumeJob ser chamado.
+// PauseJob suspende a execução de um job. O worker bloqueia na próxima checkPause.
 func PauseJob(jobID int64) {
 	mu.Lock()
-	ch, ok := pauseChs[jobID]
+	js, ok := states[jobID]
 	mu.Unlock()
 	if !ok {
 		return
 	}
-	// Sinaliza pausa — o worker lê do canal e fica bloqueado aguardando retomada
-	ch <- struct{}{}
+	js.mu.Lock()
+	js.paused = true
+	js.mu.Unlock()
 }
 
 // ResumeJob retoma um job pausado.
 func ResumeJob(jobID int64) {
 	mu.Lock()
-	ch, ok := pauseChs[jobID]
+	js, ok := states[jobID]
 	mu.Unlock()
 	if !ok {
 		return
 	}
-	ch <- struct{}{}
+	js.mu.Lock()
+	js.paused = false
+	js.cond.Broadcast()
+	js.mu.Unlock()
 }
 
-// checkPause verifica se o job deve pausar. Usa dois sinais no mesmo canal:
-// primeiro sinal = pausar (bloqueia), segundo sinal = retomar (desbloqueia).
+// checkPause verifica se o job deve pausar. Bloqueia via sync.Cond até ResumeJob.
 func checkPause(jobID int64, ctx context.Context) bool {
 	mu.Lock()
-	ch, ok := pauseChs[jobID]
+	js, ok := states[jobID]
 	mu.Unlock()
 	if !ok {
 		return false
 	}
-	select {
-	case <-ch:
-		// Pausado — aguarda retomada ou cancelamento
-		select {
-		case <-ch:
-			return false // retomado
-		case <-ctx.Done():
+	js.mu.Lock()
+	defer js.mu.Unlock()
+	for js.paused {
+		js.cond.Wait()
+		if ctx.Err() != nil {
 			return true // cancelado enquanto pausado
 		}
-	default:
-		return false
 	}
+	return false
 }
 
 func registerJob(ctx context.Context, jobID int64) context.Context {
 	ctx, cancel := context.WithCancel(ctx)
-	ch := make(chan struct{}, 2)
+	js := &jobState{cancel: cancel}
+	js.cond = sync.NewCond(&js.mu)
 	mu.Lock()
-	jobs[jobID] = cancel
-	pauseChs[jobID] = ch
+	states[jobID] = js
 	mu.Unlock()
 	return ctx
 }
 
 func unregisterJob(jobID int64) {
 	mu.Lock()
-	delete(jobs, jobID)
-	delete(pauseChs, jobID)
+	delete(states, jobID)
 	mu.Unlock()
 }
 
-func workerLoop(id int, conn *sql.DB) {
+func workerLoop(id int, store JobStore, compressor Compressor, copier FileCopier) {
 	log.Printf("worker %d started", id)
 	for {
-		jobID, typ, _, err := db.FetchPendingJob(conn)
+		jobID, typ, rawPayload, err := store.FetchPendingJob()
 		if err != nil {
 			time.Sleep(1 * time.Second)
 			continue
 		}
 		log.Printf("worker %d got job %d type=%s", id, jobID, typ)
-		payload, err := db.GetJobPayload(conn, jobID)
-		if err != nil {
-			db.UpdateJobStatus(conn, jobID, "failed", 0, err.Error())
-			continue
-		}
 
 		ctx := registerJob(context.Background(), jobID)
 		var jobErr error
 
 		switch typ {
 		case "copy":
-			jobErr = runCopyJob(ctx, conn, jobID, payload)
+			jobErr = runCopyJob(ctx, store, copier, jobID, rawPayload)
 		case "compress":
-			jobErr = runCompressJob(ctx, conn, jobID, payload)
+			jobErr = runCompressJob(ctx, store, compressor, jobID, rawPayload)
 		case "extract":
-			jobErr = runExtractJob(ctx, conn, jobID, payload)
+			jobErr = runExtractJob(ctx, store, compressor, jobID, rawPayload)
 		case "move":
-			jobErr = runMoveJob(ctx, conn, jobID, payload)
+			jobErr = runMoveJob(ctx, store, copier, jobID, rawPayload)
 		case "delete":
-			jobErr = runDeleteJob(ctx, conn, jobID, payload)
+			jobErr = runDeleteJob(ctx, store, jobID, rawPayload)
 		default:
 			jobErr = errors.New("unsupported job type")
 		}
@@ -145,89 +158,112 @@ func workerLoop(id int, conn *sql.DB) {
 		unregisterJob(jobID)
 
 		if ctx.Err() != nil {
-			_ = db.UpdateJobStatus(conn, jobID, "failed", 0, "cancelled")
+			_ = store.UpdateJobStatus(jobID, "failed", 0, "cancelled")
 			continue
 		}
 		if jobErr != nil {
-			_ = db.UpdateJobStatus(conn, jobID, "failed", 0, jobErr.Error())
+			_ = store.UpdateJobStatus(jobID, "failed", 0, jobErr.Error())
 			continue
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "done", 1.0, "")
+		_ = store.UpdateJobStatus(jobID, "done", 1.0, "")
 	}
 }
 
-func runCopyJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[string]any) error {
-	sources, err := getStringSlice(payload, "sources")
-	if err != nil {
-		return err
+func sanitizePath(p string) (string, error) {
+	clean := filepath.Clean(p)
+	if strings.Contains(clean, "..") {
+		return "", errors.New("path traversal detected")
 	}
-	dest, err := getString(payload, "dest")
-	if err != nil {
-		return err
+	if !filepath.IsAbs(clean) {
+		return "", errors.New("path must be absolute")
 	}
-	conflict, _ := getString(payload, "conflict")
-	if conflict == "" {
-		conflict = "replace"
+	return clean, nil
+}
+
+func runCopyJob(ctx context.Context, store JobStore, copier FileCopier, jobID int64, rawPayload string) error {
+	var p CopyPayload
+	if err := json.Unmarshal([]byte(rawPayload), &p); err != nil {
+		return fmt.Errorf("invalid copy payload: %w", err)
 	}
-	if len(sources) == 0 {
+	if p.Conflict == "" {
+		p.Conflict = "replace"
+	}
+	if len(p.Sources) == 0 {
 		return errors.New("copy job requires at least one source")
 	}
 
-	for idx, src := range sources {
+	cleanDest, err := sanitizePath(p.Dest)
+	if err != nil {
+		return fmt.Errorf("invalid dest: %w", err)
+	}
+
+	for idx, src := range p.Sources {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if checkPause(jobID, ctx) {
 			return ctx.Err()
 		}
-		fileName := filepath.Base(src)
-		dstPath := filepath.Join(dest, fileName)
+		cleanSrc, err := sanitizePath(src)
+		if err != nil {
+			return fmt.Errorf("invalid source: %w", err)
+		}
+		fileName := filepath.Base(cleanSrc)
+		dstPath := filepath.Join(cleanDest, fileName)
 
 		if _, err := os.Stat(dstPath); err == nil {
-			switch conflict {
+			switch p.Conflict {
 			case "skip":
-				_ = db.UpdateJobStatus(conn, jobID, "running", float64(idx+1)/float64(len(sources)), "")
+				_ = store.UpdateJobStatus(jobID, "running", float64(idx+1)/float64(len(p.Sources)), "")
 				continue
 			case "rename":
 				dstPath = renamePath(dstPath)
 			}
 		}
 
-		if err := copyimpl.CopyFile(src, dest); err != nil {
+		if err := copier.CopyFile(cleanSrc, cleanDest); err != nil {
 			return err
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "running", float64(idx+1)/float64(len(sources)), "")
+		_ = store.UpdateJobStatus(jobID, "running", float64(idx+1)/float64(len(p.Sources)), "")
 	}
 	return nil
 }
 
-func runCompressJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[string]any) error {
+func runCompressJob(ctx context.Context, store JobStore, compressor Compressor, jobID int64, rawPayload string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	sources, err := getStringSlice(payload, "sources")
-	if err != nil {
-		return err
+	var p CompressPayload
+	if err := json.Unmarshal([]byte(rawPayload), &p); err != nil {
+		return fmt.Errorf("invalid compress payload: %w", err)
 	}
-	dest, err := getString(payload, "dest")
-	if err != nil {
-		return err
+	if p.Conflict == "" {
+		p.Conflict = "replace"
 	}
-	conflict, _ := getString(payload, "conflict")
-	if conflict == "" {
-		conflict = "replace"
-	}
-	if len(sources) == 0 {
+	if len(p.Sources) == 0 {
 		return errors.New("compress job requires at least one source")
 	}
 
-	if _, statErr := os.Stat(dest); statErr == nil {
-		switch conflict {
+	cleanSources := make([]string, 0, len(p.Sources))
+	for _, s := range p.Sources {
+		cs, err := sanitizePath(s)
+		if err != nil {
+			return fmt.Errorf("invalid source: %w", err)
+		}
+		cleanSources = append(cleanSources, cs)
+	}
+	cleanDest, err := sanitizePath(p.Dest)
+	if err != nil {
+		return fmt.Errorf("invalid dest: %w", err)
+	}
+
+	if _, statErr := os.Stat(cleanDest); statErr == nil {
+		switch p.Conflict {
 		case "skip":
-			_ = db.UpdateJobStatus(conn, jobID, "running", 1.0, "")
+			_ = store.UpdateJobStatus(jobID, "running", 1.0, "")
 			return nil
 		case "rename":
-			dest = renamePath(dest)
+			cleanDest = renamePath(cleanDest)
 		}
 	}
 
@@ -235,38 +271,42 @@ func runCompressJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[
 		if checkPause(jobID, ctx) {
 			return
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "running", pct, "")
+		_ = store.UpdateJobStatus(jobID, "running", pct, "")
 	}
-	if err := compress.CompressManyCtx(ctx, sources, dest, progressCb); err != nil {
+	if err := compressor.CompressManyCtx(ctx, cleanSources, cleanDest, progressCb); err != nil {
 		return err
 	}
 	return nil
 }
 
-func runExtractJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[string]any) error {
+func runExtractJob(ctx context.Context, store JobStore, compressor Compressor, jobID int64, rawPayload string) error {
 	if ctx.Err() != nil {
 		return ctx.Err()
 	}
-	archive, err := getString(payload, "archive")
-	if err != nil {
-		return err
+	var p ExtractPayload
+	if err := json.Unmarshal([]byte(rawPayload), &p); err != nil {
+		return fmt.Errorf("invalid extract payload: %w", err)
 	}
-	dest, err := getString(payload, "dest")
-	if err != nil {
-		return err
-	}
-	conflict, _ := getString(payload, "conflict")
-	if conflict == "" {
-		conflict = "replace"
+	if p.Conflict == "" {
+		p.Conflict = "replace"
 	}
 
-	if _, statErr := os.Stat(dest); statErr == nil {
-		switch conflict {
+	cleanArchive, err := sanitizePath(p.Archive)
+	if err != nil {
+		return fmt.Errorf("invalid archive: %w", err)
+	}
+	cleanDest, err := sanitizePath(p.Dest)
+	if err != nil {
+		return fmt.Errorf("invalid dest: %w", err)
+	}
+
+	if _, statErr := os.Stat(cleanDest); statErr == nil {
+		switch p.Conflict {
 		case "skip":
-			_ = db.UpdateJobStatus(conn, jobID, "running", 1.0, "")
+			_ = store.UpdateJobStatus(jobID, "running", 1.0, "")
 			return nil
 		case "rename":
-			dest = renamePath(dest)
+			cleanDest = renamePath(cleanDest)
 		}
 	}
 
@@ -274,44 +314,12 @@ func runExtractJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[s
 		if checkPause(jobID, ctx) {
 			return
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "running", pct, "")
+		_ = store.UpdateJobStatus(jobID, "running", pct, "")
 	}
-	if err := compress.ExtractCtx(ctx, archive, dest, progressCb); err != nil {
+	if err := compressor.ExtractCtx(ctx, cleanArchive, cleanDest, progressCb); err != nil {
 		return err
 	}
 	return nil
-}
-
-func getString(m map[string]any, key string) (string, error) {
-	raw, ok := m[key]
-	if !ok {
-		return "", fmt.Errorf("missing %s", key)
-	}
-	val, ok := raw.(string)
-	if !ok || val == "" {
-		return "", fmt.Errorf("invalid %s", key)
-	}
-	return val, nil
-}
-
-func getStringSlice(m map[string]any, key string) ([]string, error) {
-	raw, ok := m[key]
-	if !ok {
-		return nil, fmt.Errorf("missing %s", key)
-	}
-	items, ok := raw.([]any)
-	if !ok {
-		return nil, fmt.Errorf("invalid %s", key)
-	}
-	out := make([]string, 0, len(items))
-	for _, item := range items {
-		s, ok := item.(string)
-		if !ok || s == "" {
-			return nil, fmt.Errorf("invalid %s item", key)
-		}
-		out = append(out, s)
-	}
-	return out, nil
 }
 
 func renamePath(p string) string {
@@ -326,68 +334,76 @@ func renamePath(p string) string {
 	return p
 }
 
-func runMoveJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[string]any) error {
-	sources, err := getStringSlice(payload, "sources")
-	if err != nil {
-		return err
+func runMoveJob(ctx context.Context, store JobStore, copier FileCopier, jobID int64, rawPayload string) error {
+	var p MovePayload
+	if err := json.Unmarshal([]byte(rawPayload), &p); err != nil {
+		return fmt.Errorf("invalid move payload: %w", err)
 	}
-	dest, err := getString(payload, "dest")
-	if err != nil {
-		return err
+	if p.Conflict == "" {
+		p.Conflict = "replace"
 	}
-	conflict, _ := getString(payload, "conflict")
-	if conflict == "" {
-		conflict = "replace"
-	}
-	if len(sources) == 0 {
+	if len(p.Sources) == 0 {
 		return errors.New("move job requires at least one source")
 	}
 
-	for idx, src := range sources {
+	cleanDest, err := sanitizePath(p.Dest)
+	if err != nil {
+		return fmt.Errorf("invalid dest: %w", err)
+	}
+
+	for idx, src := range p.Sources {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
 		if checkPause(jobID, ctx) {
 			return ctx.Err()
 		}
-		fileName := filepath.Base(src)
-		dstPath := filepath.Join(dest, fileName)
+		cleanSrc, err := sanitizePath(src)
+		if err != nil {
+			return fmt.Errorf("invalid source: %w", err)
+		}
+		fileName := filepath.Base(cleanSrc)
+		dstPath := filepath.Join(cleanDest, fileName)
 
 		if _, err := os.Stat(dstPath); err == nil {
-			switch conflict {
+			switch p.Conflict {
 			case "skip":
-				_ = db.UpdateJobStatus(conn, jobID, "running", float64(idx+1)/float64(len(sources)), "")
+				_ = store.UpdateJobStatus(jobID, "running", float64(idx+1)/float64(len(p.Sources)), "")
 				continue
 			case "rename":
 				dstPath = renamePath(dstPath)
 			}
 		}
 
-		if err := os.Rename(src, dstPath); err != nil {
-			if err := copyFileSimple(src, dstPath); err != nil {
+		if err := os.Rename(cleanSrc, dstPath); err != nil {
+			if err := copyFileSimple(cleanSrc, dstPath); err != nil {
 				return err
 			}
-			os.Remove(src)
+			os.Remove(cleanSrc)
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "running", float64(idx+1)/float64(len(sources)), "")
+		_ = store.UpdateJobStatus(jobID, "running", float64(idx+1)/float64(len(p.Sources)), "")
 	}
 	return nil
 }
 
-func runDeleteJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[string]any) error {
-	sources, err := getStringSlice(payload, "sources")
-	if err != nil {
-		return err
+func runDeleteJob(ctx context.Context, store JobStore, jobID int64, rawPayload string) error {
+	var p DeletePayload
+	if err := json.Unmarshal([]byte(rawPayload), &p); err != nil {
+		return fmt.Errorf("invalid delete payload: %w", err)
 	}
-	if len(sources) == 0 {
+	if len(p.Sources) == 0 {
 		return errors.New("delete job requires at least one source")
 	}
 
-	for idx, src := range sources {
+	for idx, src := range p.Sources {
 		if ctx.Err() != nil {
 			return ctx.Err()
 		}
-		info, err := os.Stat(src)
+		cleanSrc, err := sanitizePath(src)
+		if err != nil {
+			return fmt.Errorf("invalid source: %w", err)
+		}
+		info, err := os.Stat(cleanSrc)
 		if err != nil {
 			if os.IsNotExist(err) {
 				continue
@@ -395,14 +411,14 @@ func runDeleteJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[st
 			return err
 		}
 		if info.IsDir() {
-			err = os.RemoveAll(src)
+			err = os.RemoveAll(cleanSrc)
 		} else {
-			err = os.Remove(src)
+			err = os.Remove(cleanSrc)
 		}
 		if err != nil {
 			return err
 		}
-		_ = db.UpdateJobStatus(conn, jobID, "running", float64(idx+1)/float64(len(sources)), "")
+		_ = store.UpdateJobStatus(jobID, "running", float64(idx+1)/float64(len(p.Sources)), "")
 	}
 	return nil
 }

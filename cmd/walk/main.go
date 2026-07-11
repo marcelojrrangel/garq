@@ -17,7 +17,9 @@ import (
 	. "github.com/lxn/walk/declarative"
 	"github.com/lxn/win"
 
+	"garq/compress"
 	"garq/internal/api"
+	copyimpl "garq/internal/copy"
 	"garq/internal/db"
 	"garq/internal/worker"
 )
@@ -260,7 +262,8 @@ func main() {
 	}
 	defer dbConn.Close()
 
-	worker.StartWorkerPool(4, dbConn)
+	store := &db.DBStore{DB: dbConn}
+	worker.StartWorkerPool(4, store, compress.CLIAdapter{}, copyimpl.CopierAdapter{})
 	apiInstance := &api.API{DB: dbConn, Ctx: context.Background()}
 	log.Printf("Banco inicializado: %s", dbPath)
 
@@ -837,13 +840,8 @@ func (mw *GarqMainWindow) navigateTabTo(tp *TabPane, path string) {
 
 	var fileEntries []FileEntry
 	for _, e := range entries {
-		name, _ := e["name"].(string)
-		p, _ := e["path"].(string)
-		isDir, _ := e["is_dir"].(bool)
-		size, _ := e["size"].(int64)
-		modStr, _ := e["mod_time"].(string)
-		mt, _ := time.Parse("2006-01-02 15:04:05", modStr)
-		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: mt})
+		mt, _ := time.Parse("2006-01-02 15:04:05", e.ModTime)
+		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: mt})
 	}
 
 	if len(tp.history) == 0 || tp.history[len(tp.history)-1] != path {
@@ -919,13 +917,8 @@ func (mw *GarqMainWindow) navigateTabDirect(tp *TabPane, path string) {
 
 	var fileEntries []FileEntry
 	for _, e := range entries {
-		name, _ := e["name"].(string)
-		p, _ := e["path"].(string)
-		isDir, _ := e["is_dir"].(bool)
-		size, _ := e["size"].(int64)
-		modStr, _ := e["mod_time"].(string)
-		mt, _ := time.Parse("2006-01-02 15:04:05", modStr)
-		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: mt})
+		mt, _ := time.Parse("2006-01-02 15:04:05", e.ModTime)
+		fileEntries = append(fileEntries, FileEntry{Name: e.Name, Path: e.Path, IsDir: e.IsDir, Size: e.Size, ModTime: mt})
 	}
 
 	title := tabTitle(path)

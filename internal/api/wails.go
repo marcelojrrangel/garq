@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/json"
 	"errors"
+	"net/http"
 
 	"garq/internal/db"
 	"garq/internal/worker"
@@ -12,8 +13,9 @@ import (
 
 // API holds resources for the file manager backend.
 type API struct {
-	DB  *sql.DB
-	Ctx context.Context
+	DB         *sql.DB
+	Ctx        context.Context
+	HTTPServer *http.Server
 }
 
 // AddCopyJob enqueues a copy job. Called from frontend via Wails.
@@ -80,14 +82,14 @@ func (a *API) AddDeleteJob(sources []string) (int64, error) {
 	return db.EnqueueJob(a.DB, "delete", payload)
 }
 
-// GetJobs returns recent jobs (simple representation). Frontend can parse payload JSON.
-func (a *API) GetJobs() ([]map[string]any, error) {
+// GetJobs returns recent jobs. Frontend can parse payload JSON.
+func (a *API) GetJobs() ([]JobDTO, error) {
 	rows, err := a.DB.Query("SELECT id,type,payload,status,progress,error,created_at,updated_at FROM jobs ORDER BY id DESC LIMIT 200")
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
-	var out []map[string]any
+	var out []JobDTO
 	for rows.Next() {
 		var id int64
 		var typ, payload, status string
@@ -103,17 +105,16 @@ func (a *API) GetJobs() ([]map[string]any, error) {
 		if errMsg.Valid {
 			errStr = errMsg.String
 		}
-		m := map[string]any{
-			"id":         id,
-			"type":       typ,
-			"payload":    parsed,
-			"status":     status,
-			"progress":   progress,
-			"error":      errStr,
-			"created_at": createdAt,
-			"updated_at": updatedAt,
-		}
-		out = append(out, m)
+		out = append(out, JobDTO{
+			ID:        id,
+			Type:      typ,
+			Payload:   parsed,
+			Status:    status,
+			Progress:  progress,
+			Error:     errStr,
+			CreatedAt: createdAt,
+			UpdatedAt: updatedAt,
+		})
 	}
 	return out, nil
 }
