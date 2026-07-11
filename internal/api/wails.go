@@ -13,9 +13,20 @@ import (
 
 // API holds resources for the file manager backend.
 type API struct {
-	DB         *sql.DB
+	db         *sql.DB
 	Ctx        context.Context
 	HTTPServer *http.Server
+}
+
+// New creates an API instance with the given database connection.
+func New(db *sql.DB) *API {
+	return &API{db: db, Ctx: context.Background()}
+}
+
+// DBConn returns the underlying database connection.
+// It is intended for internal service use only.
+func (a *API) DBConn() *sql.DB {
+	return a.db
 }
 
 // AddCopyJob enqueues a copy job. Called from frontend via Wails.
@@ -30,7 +41,7 @@ func (a *API) AddCopyJob(sources []string, dest string, conflict string) (int64,
 		conflict = "replace"
 	}
 	payload := map[string]any{"sources": sources, "dest": dest, "conflict": conflict}
-	return db.EnqueueJob(a.DB, "copy", payload)
+	return db.EnqueueJob(a.db, "copy", payload)
 }
 
 func (a *API) AddCompressJob(sources []string, dest string, conflict string) (int64, error) {
@@ -44,7 +55,7 @@ func (a *API) AddCompressJob(sources []string, dest string, conflict string) (in
 		conflict = "replace"
 	}
 	payload := map[string]any{"sources": sources, "dest": dest, "conflict": conflict}
-	return db.EnqueueJob(a.DB, "compress", payload)
+	return db.EnqueueJob(a.db, "compress", payload)
 }
 
 func (a *API) AddExtractJob(archive string, dest string, conflict string) (int64, error) {
@@ -55,7 +66,7 @@ func (a *API) AddExtractJob(archive string, dest string, conflict string) (int64
 		conflict = "replace"
 	}
 	payload := map[string]any{"archive": archive, "dest": dest, "conflict": conflict}
-	return db.EnqueueJob(a.DB, "extract", payload)
+	return db.EnqueueJob(a.db, "extract", payload)
 }
 
 // AddMoveJob enqueues a move (cut+paste) job.
@@ -70,7 +81,7 @@ func (a *API) AddMoveJob(sources []string, dest string, conflict string) (int64,
 		conflict = "replace"
 	}
 	payload := map[string]any{"sources": sources, "dest": dest, "conflict": conflict}
-	return db.EnqueueJob(a.DB, "move", payload)
+	return db.EnqueueJob(a.db, "move", payload)
 }
 
 // AddDeleteJob enqueues a delete job.
@@ -79,12 +90,12 @@ func (a *API) AddDeleteJob(sources []string) (int64, error) {
 		return 0, errors.New("sources cannot be empty")
 	}
 	payload := map[string]any{"sources": sources}
-	return db.EnqueueJob(a.DB, "delete", payload)
+	return db.EnqueueJob(a.db, "delete", payload)
 }
 
 // GetJobs returns recent jobs. Frontend can parse payload JSON.
 func (a *API) GetJobs() ([]JobDTO, error) {
-	rows, err := a.DB.Query("SELECT id,type,payload,status,progress,error,created_at,updated_at FROM jobs ORDER BY id DESC LIMIT 200")
+	rows, err := a.db.Query("SELECT id,type,payload,status,progress,error,created_at,updated_at FROM jobs ORDER BY id DESC LIMIT 200")
 	if err != nil {
 		return nil, err
 	}

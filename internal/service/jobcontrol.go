@@ -4,7 +4,7 @@ import "garq/internal/worker"
 
 // JobSnapshot returns the current state of a single job.
 func (s *Service) JobSnapshot(id int64) (JobSnapshot, error) {
-	row := s.api.DB.QueryRow(
+	row := s.api.DBConn().QueryRow(
 		`SELECT id, type, status, progress, COALESCE(error,''), COALESCE(payload,'') FROM jobs WHERE id=?`,
 		id,
 	)
@@ -15,7 +15,7 @@ func (s *Service) JobSnapshot(id int64) (JobSnapshot, error) {
 
 // ActiveJobCount returns the number of pending or running jobs.
 func (s *Service) ActiveJobCount() (int, error) {
-	row := s.api.DB.QueryRow(`SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running')`)
+	row := s.api.DBConn().QueryRow(`SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running')`)
 	var count int
 	err := row.Scan(&count)
 	return count, err

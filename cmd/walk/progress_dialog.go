@@ -3,7 +3,6 @@
 package main
 
 import (
-	"database/sql"
 	"encoding/json"
 	"fmt"
 	"log"
@@ -13,8 +12,7 @@ import (
 	. "github.com/lxn/walk/declarative"
 	"golang.org/x/sys/windows"
 
-	"garq/internal/db"
-	"garq/internal/worker"
+	"garq/internal/service"
 )
 
 // ---------------------------------------------------------------------------
@@ -41,35 +39,12 @@ func pbSetState(pb *walk.ProgressBar, state uintptr) {
 }
 
 // ---------------------------------------------------------------------------
-// JobSnapshot — leitura do banco para um job específico
-// ---------------------------------------------------------------------------
-
-type JobSnapshot struct {
-	ID       int64
-	Type     string
-	Status   string
-	Progress float64
-	ErrMsg   string
-	Payload  string // JSON raw
-}
-
-func fetchJob(dbConn *sql.DB, id int64) (JobSnapshot, error) {
-	row := dbConn.QueryRow(
-		`SELECT id, type, status, progress, COALESCE(error,''), COALESCE(payload,'') FROM jobs WHERE id=?`, id,
-	)
-	var j JobSnapshot
-	err := row.Scan(&j.ID, &j.Type, &j.Status, &j.Progress, &j.ErrMsg, &j.Payload)
-	return j, err
-}
-
-// ---------------------------------------------------------------------------
 // ProgressDialog
 // ---------------------------------------------------------------------------
 
 type ProgressDialog struct {
 	dialog      *walk.Dialog
 	mw          *GarqMainWindow
-	dbConn      *sql.DB
 	jobID       int64
 
 	// Widgets
@@ -95,10 +70,9 @@ type ProgressDialog struct {
 }
 
 // newProgressDialog cria e exibe o dialog não-modal para um job.
-func newProgressDialog(mw *GarqMainWindow, dbConn *sql.DB, jobID int64, jobType string) *ProgressDialog {
+func newProgressDialog(mw *GarqMainWindow, jobID int64, jobType string) *ProgressDialog {
 	pd := &ProgressDialog{
 		mw:        mw,
-		dbConn:    dbConn,
 		jobID:     jobID,
 		startTime: time.Now(),
 	}
@@ -206,7 +180,7 @@ func newProgressDialog(mw *GarqMainWindow, dbConn *sql.DB, jobID int64, jobType 
 	pd.detailsPane = detailsPane
 
 	// Preenche De/Para a partir do payload do job
-	j, err := fetchJob(dbConn, jobID)
+	j, err := mw.service.JobSnapshot(jobID)
 	if err == nil {
 		from, to := pathsFromPayload(j.Payload, j.Type)
 		if from != "" {
@@ -248,7 +222,7 @@ func (pd *ProgressDialog) startPolling() {
 			if pd.dialog == nil {
 				return
 			}
-			j, err := fetchJob(pd.dbConn, pd.jobID)
+			j, err := pd.mw.service.JobSnapshot(pd.jobID)
 			if err != nil {
 				continue
 			}
@@ -263,7 +237,7 @@ func (pd *ProgressDialog) startPolling() {
 	}()
 }
 
-func (pd *ProgressDialog) update(j JobSnapshot) {
+func (pd *ProgressDialog) update(j service.JobSnapshot) {
 	if pd.dialog == nil {
 		return
 	}
@@ -349,13 +323,13 @@ func (pd *ProgressDialog) update(j JobSnapshot) {
 
 func (pd *ProgressDialog) togglePause() {
 	if pd.paused {
-		worker.ResumeJob(pd.jobID)
+		pd.mw.service.ResumeJob(pd.jobID)
 		pd.paused = false
 		pd.btnPause.SetText("⏸  Pausar")
 		pbSetState(pd.progressBar, pbstNormal)
 		pd.labelStats.SetText("Retomando...")
 	} else {
-		worker.PauseJob(pd.jobID)
+		pd.mw.service.PauseJob(pd.jobID)
 		pd.paused = true
 		pd.btnPause.SetText("▶  Retomar")
 		pbSetState(pd.progressBar, pbstPaused)
@@ -369,8 +343,7 @@ func (pd *ProgressDialog) cancel() {
 		pd.dialog.Close(walk.DlgCmdCancel)
 		return
 	}
-	worker.CancelJob(pd.jobID)
-	db.UpdateJobStatus(pd.dbConn, pd.jobID, "failed", float64(pd.lastPct)/100.0, "cancelado pelo usuário")
+	pd.mw.service.CancelJob(pd.jobID)
 	pd.dialog.Close(walk.DlgCmdCancel)
 }
 

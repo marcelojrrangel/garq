@@ -15,7 +15,7 @@ func setupTestService(t *testing.T) (*Service, func()) {
 	if err != nil {
 		t.Fatalf("init db: %v", err)
 	}
-	a := &api.API{DB: dbConn}
+	a := api.New(dbConn)
 	svc := New(a)
 	return svc, func() { dbConn.Close() }
 }
@@ -24,7 +24,7 @@ func TestJobSnapshot(t *testing.T) {
 	svc, cleanup := setupTestService(t)
 	defer cleanup()
 
-	id, err := db.EnqueueJob(svc.api.DB, "copy", map[string]any{
+	id, err := db.EnqueueJob(svc.api.DBConn(), "copy", map[string]any{
 		"sources": []string{"a.txt"},
 		"dest":    "b",
 	})
@@ -55,7 +55,7 @@ func TestJobSnapshot(t *testing.T) {
 		t.Error("Payload should not be empty")
 	}
 
-	if err := db.UpdateJobStatus(svc.api.DB, id, "running", 0.5, "oops"); err != nil {
+	if err := db.UpdateJobStatus(svc.api.DBConn(), id, "running", 0.5, "oops"); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 	snap, err = svc.JobSnapshot(id)
@@ -85,7 +85,7 @@ func TestActiveJobCount(t *testing.T) {
 		t.Errorf("count = %d, want 0", count)
 	}
 
-	id, err := db.EnqueueJob(svc.api.DB, "move", map[string]any{
+	id, err := db.EnqueueJob(svc.api.DBConn(), "move", map[string]any{
 		"sources": []string{"a.txt"},
 		"dest":    "b",
 	})
@@ -101,7 +101,7 @@ func TestActiveJobCount(t *testing.T) {
 		t.Errorf("count = %d, want 1", count)
 	}
 
-	if err := db.UpdateJobStatus(svc.api.DB, id, "done", 1.0, ""); err != nil {
+	if err := db.UpdateJobStatus(svc.api.DBConn(), id, "done", 1.0, ""); err != nil {
 		t.Fatalf("update status: %v", err)
 	}
 	count, err = svc.ActiveJobCount()

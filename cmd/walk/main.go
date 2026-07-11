@@ -1,7 +1,6 @@
 package main
 
 import (
-	"context"
 	"fmt"
 	"log"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"garq/internal/api"
 	copyimpl "garq/internal/copy"
 	"garq/internal/db"
+	"garq/internal/service"
 	"garq/internal/worker"
 )
 
@@ -75,6 +75,7 @@ func (tp *TabPane) currentPath() string {
 type GarqMainWindow struct {
 	*walk.MainWindow
 	api         *api.API
+	service     *service.Service
 	navTree     *walk.TreeView
 	tabWidget   *walk.TabWidget
 	statusLabel *walk.Label
@@ -264,7 +265,8 @@ func main() {
 
 	store := &db.DBStore{DB: dbConn}
 	worker.StartWorkerPool(4, store, compress.CLIAdapter{}, copyimpl.CopierAdapter{})
-	apiInstance := &api.API{DB: dbConn, Ctx: context.Background()}
+	apiInstance := api.New(dbConn)
+	svc := service.New(apiInstance)
 	log.Printf("Banco inicializado: %s", dbPath)
 
 	navModel := &NavTreeModel{}
@@ -272,6 +274,7 @@ func main() {
 
 	mw := &GarqMainWindow{
 		api:      apiInstance,
+		service:  svc,
 		navModel: navModel,
 	}
 
@@ -980,14 +983,9 @@ func (mw *GarqMainWindow) updateStatusBar() {
 
 // updateActiveJobsStatus mostra na statusbar quantos jobs estão rodando.
 func (mw *GarqMainWindow) updateActiveJobsStatus() {
-	rows, err := mw.api.DB.Query(`SELECT COUNT(*) FROM jobs WHERE status IN ('pending','running')`)
+	count, err := mw.service.ActiveJobCount()
 	if err != nil {
 		return
-	}
-	defer rows.Close()
-	var count int
-	if rows.Next() {
-		rows.Scan(&count)
 	}
 	tp := mw.activeTab()
 	base := "Pronto"
@@ -1017,7 +1015,7 @@ func (mw *GarqMainWindow) refreshActiveTab() {
 
 // openProgressDialog abre um dialog de progresso para um job recém-criado.
 func (mw *GarqMainWindow) openProgressDialog(jobID int64, jobType string) {
-	newProgressDialog(mw, mw.api.DB, jobID, jobType)
+	newProgressDialog(mw, jobID, jobType)
 }
 
 func (mw *GarqMainWindow) filterBySearch() {
