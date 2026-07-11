@@ -231,8 +231,13 @@ func runCompressJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[
 		}
 	}
 
-	_ = db.UpdateJobStatus(conn, jobID, "running", 0.5, "")
-	if err := compress.CompressMany(sources, dest); err != nil {
+	progressCb := func(pct float64) {
+		if checkPause(jobID, ctx) {
+			return
+		}
+		_ = db.UpdateJobStatus(conn, jobID, "running", pct, "")
+	}
+	if err := compress.CompressManyCtx(ctx, sources, dest, progressCb); err != nil {
 		return err
 	}
 	return nil
@@ -265,8 +270,13 @@ func runExtractJob(ctx context.Context, conn *sql.DB, jobID int64, payload map[s
 		}
 	}
 
-	_ = db.UpdateJobStatus(conn, jobID, "running", 0.5, "")
-	if err := compress.Extract(archive, dest); err != nil {
+	progressCb := func(pct float64) {
+		if checkPause(jobID, ctx) {
+			return
+		}
+		_ = db.UpdateJobStatus(conn, jobID, "running", pct, "")
+	}
+	if err := compress.ExtractCtx(ctx, archive, dest, progressCb); err != nil {
 		return err
 	}
 	return nil

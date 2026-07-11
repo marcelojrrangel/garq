@@ -1,9 +1,11 @@
 package compress
 
 import (
+	"context"
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func findTest7z(t *testing.T) string {
@@ -123,5 +125,128 @@ func TestExtractToNewDir(t *testing.T) {
 	}
 	if string(got) != "test" {
 		t.Errorf("got %q, want %q", got, "test")
+	}
+}
+
+func TestParseProgress(t *testing.T) {
+	tests := []struct {
+		line     string
+		expected float64
+		ok       bool
+	}{
+		{"\r35%", 0.35, true},
+		{"35%", 0.35, true},
+		{"\r78% - file.txt", 0.78, true},
+		{"\r100%", 1.0, true},
+		{"0%", 0.0, true},
+		{"100%", 1.0, true},
+		{"Extracting  file.txt", 0, false},
+		{"", 0, false},
+		{"some random text", 0, false},
+	}
+	for _, tc := range tests {
+		got, ok := parseProgress(tc.line)
+		if ok != tc.ok || got != tc.expected {
+			t.Errorf("parseProgress(%q) = (%v, %v), want (%v, %v)", tc.line, got, ok, tc.expected, tc.ok)
+		}
+	}
+}
+
+func TestCompressManyCtx(t *testing.T) {
+	_ = findTest7z(t)
+	srcDir := t.TempDir()
+	outDir := t.TempDir()
+
+	srcPath := filepath.Join(srcDir, "test_data.bin")
+	data := make([]byte, 5<<20)
+	for i := range data {
+		data[i] = byte(i)
+	}
+	os.WriteFile(srcPath, data, 0644)
+
+	archive := filepath.Join(outDir, "test.7z")
+	var progresses []float64
+	cb := func(pct float64) {
+		progresses = append(progresses, pct)
+	}
+
+	ctx := context.Background()
+	if err := CompressManyCtx(ctx, []string{srcPath}, archive, cb); err != nil {
+		t.Fatalf("CompressManyCtx failed: %v", err)
+	}
+	if _, err := os.Stat(archive); os.IsNotExist(err) {
+		t.Fatal("archive was not created")
+	}
+	if len(progresses) == 0 {
+		t.Log("no intermediate progress reported (small file)")
+	} else {
+		last := progresses[len(progresses)-1]
+		if last < 0.9 {
+			t.Errorf("last progress %.2f, expected near 1.0", last)
+		}
+		t.Logf("progress updates: %d, last: %.2f", len(progresses), last)
+	}
+}
+
+func TestExtractCtx(t *testing.T) {
+	_ = findTest7z(t)
+	srcDir := t.TempDir()
+	outDir := t.TempDir()
+	extractDir := t.TempDir()
+
+	srcPath := filepath.Join(srcDir, "file.txt")
+	os.WriteFile(srcPath, []byte("hello world"), 0644)
+
+	archive := filepath.Join(outDir, "test.7z")
+	CompressMany([]string{srcPath}, archive)
+
+	var progresses []float64
+	cb := func(pct float64) {
+		progresses = append(progresses, pct)
+	}
+
+	ctx := context.Background()
+	if err := ExtractCtx(ctx, archive, extractDir, cb); err != nil {
+		t.Fatalf("ExtractCtx failed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(extractDir, "file.txt"))
+	if err != nil {
+		t.Fatalf("read extracted file failed: %v", err)
+	}
+	if string(got) != "hello world" {
+		t.Errorf("got %q, want %q", got, "hello world")
+	}
+	t.Logf("extract progress updates: %d", len(progresses))
+}
+
+func TestCompressManyCtxCancel(t *testing.T) {
+	_ = findTest7z(t)
+	srcDir := t.TempDir()
+	outDir := t.TempDir()
+
+	srcPath := filepath.Join(srcDir, "large.bin")
+	data := make([]byte, 50<<20)
+	for i := range data {
+		data[i] = byte(i & 0xFF)
+	}
+	os.WriteFile(srcPath, data, 0644)
+
+	archive := filepath.Join(outDir, "test.7z")
+	ctx, cancel := context.WithCancel(context.Background())
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- CompressManyCtx(ctx, []string{srcPath}, archive, nil)
+	}()
+
+	<-time.After(200 * time.Millisecond)
+	cancel()
+
+	err := <-errCh
+	if err == nil {
+		t.Fatal("expected error after cancel, got nil")
+	}
+	if err != context.Canceled {
+		t.Logf("got error: %v (may be process kill)", err)
 	}
 }

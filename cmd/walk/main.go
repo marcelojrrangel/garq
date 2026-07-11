@@ -9,15 +9,27 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+	"syscall"
 	"time"
+	"unsafe"
 
 	"github.com/lxn/walk"
 	. "github.com/lxn/walk/declarative"
+	"github.com/lxn/win"
 
 	"garq/internal/api"
 	"garq/internal/db"
 	"garq/internal/worker"
 )
+
+func init() {
+	logPath := filepath.Join(os.TempDir(), "garq.log")
+	f, err := os.Create(logPath)
+	if err == nil {
+		log.SetOutput(f)
+	}
+	log.Println("=== Garq iniciado ===")
+}
 
 // ---------------------------------------------------------------------------
 // Tipos de dados
@@ -28,7 +40,7 @@ type FileEntry struct {
 	Path    string
 	IsDir   bool
 	Size    int64
-	ModTime string
+	ModTime time.Time
 }
 
 // TabPane encapsula todo o estado independente de uma aba.
@@ -37,9 +49,11 @@ type TabPane struct {
 	fileList   *walk.TableView
 	pathEdit   *walk.LineEdit
 	searchEdit *walk.LineEdit
-	previewImage *walk.ImageView
-	previewText  *walk.TextEdit
-	previewLabel *walk.Label
+	previewImage   *walk.ImageView
+	previewText    *walk.TextEdit
+	previewLabel   *walk.Label
+	previewVisible  bool
+	previewComposite *walk.Composite
 	fileModel  *FileTableModel
 	allEntries []FileEntry
 	history    []string
@@ -64,6 +78,11 @@ type GarqMainWindow struct {
 	statusLabel *walk.Label
 	navModel    *NavTreeModel
 	tabs        []*TabPane
+	btnBack     *walk.PushButton
+	btnForward  *walk.PushButton
+	btnUp       *walk.PushButton
+	btnNewTab   *walk.PushButton
+	btnCloseTab *walk.PushButton
 }
 
 func (mw *GarqMainWindow) activeTab() *TabPane {
@@ -82,13 +101,23 @@ func (mw *GarqMainWindow) activeTab() *TabPane {
 // ---------------------------------------------------------------------------
 
 type NavItem struct {
-	text     string
-	path     string
-	parent   *NavItem
-	children []*NavItem
+	text      string
+	path      string
+	parent    *NavItem
+	children  []*NavItem
+	isSection bool
 }
 
 func (item *NavItem) Text() string { return item.text }
+func (item *NavItem) Image() interface{} {
+	if item.path != "" {
+		return item.path
+	}
+	if item.text == "Unidades" {
+		return "C:\\"
+	}
+	return os.Getenv("USERPROFILE")
+}
 func (item *NavItem) Parent() walk.TreeItem {
 	if item.parent == nil {
 		return nil
@@ -144,8 +173,6 @@ func (m *FileTableModel) Value(row, col int) interface{} {
 	case 0:
 		return e.Name
 	case 1:
-		return e.ModTime
-	case 2:
 		if e.IsDir {
 			return "Pasta"
 		}
@@ -154,11 +181,16 @@ func (m *FileTableModel) Value(row, col int) interface{} {
 			return ext
 		}
 		return "Arquivo"
-	case 3:
+	case 2:
 		if e.IsDir {
 			return ""
 		}
 		return formatSize(e.Size)
+	case 3:
+		if e.ModTime.IsZero() {
+			return ""
+		}
+		return e.ModTime.Format("02/01/2006 15:04:05")
 	}
 	return ""
 }
@@ -181,6 +213,41 @@ func formatSize(size int64) string {
 // main
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Shell icon helper
+// ---------------------------------------------------------------------------
+
+func getShellIcon(path string) *walk.Icon {
+	var shfi win.SHFILEINFO
+	ret := win.SHGetFileInfo(
+		syscall.StringToUTF16Ptr(path),
+		0,
+		&shfi,
+		uint32(unsafe.Sizeof(shfi)),
+		win.SHGFI_ICON|win.SHGFI_SMALLICON,
+	)
+	if ret == 0 {
+		log.Printf("SHGetFileInfo falhou para %s", path)
+		return nil
+	}
+	icon, err := walk.NewIconFromHICON(shfi.HIcon)
+	if err != nil {
+		log.Printf("NewIconFromHICON falhou: %v", err)
+		win.DestroyIcon(shfi.HIcon)
+		return nil
+	}
+	return icon
+}
+
+func tabTitle(path string) string {
+	trimmed := strings.TrimRight(path, "\\")
+	base := filepath.Base(trimmed)
+	if base == "" || base == "." {
+		return path
+	}
+	return base
+}
+
 func main() {
 	dbPath := "garq.db"
 	if envPath := os.Getenv("GARQ_DB_PATH"); envPath != "" {
@@ -195,9 +262,10 @@ func main() {
 
 	worker.StartWorkerPool(4, dbConn)
 	apiInstance := &api.API{DB: dbConn, Ctx: context.Background()}
+	log.Printf("Banco inicializado: %s", dbPath)
 
 	navModel := &NavTreeModel{}
-	buildNavTree(navModel)
+	buildSectionedNavTree(navModel)
 
 	mw := &GarqMainWindow{
 		api:      apiInstance,
@@ -214,11 +282,12 @@ func main() {
 			Composite{
 				Layout: HBox{MarginsZero: true},
 				Children: []Widget{
-					PushButton{Text: "<", MinSize: Size{Width: 30}, OnClicked: func() { mw.goBack() }},
-					PushButton{Text: ">", MinSize: Size{Width: 30}, OnClicked: func() { mw.goForward() }},
-					PushButton{Text: "^", MinSize: Size{Width: 30}, OnClicked: func() { mw.goUp() }},
-					PushButton{Text: "+ Aba", MinSize: Size{Width: 55}, OnClicked: func() { mw.newTab("") }},
-					PushButton{Text: "x Aba", MinSize: Size{Width: 55}, OnClicked: func() { mw.closeCurrentTab() }},
+					PushButton{AssignTo: &mw.btnBack, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.goBack() }},
+					PushButton{AssignTo: &mw.btnForward, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.goForward() }},
+					PushButton{AssignTo: &mw.btnUp, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.goUp() }},
+					VSeparator{},
+					PushButton{AssignTo: &mw.btnNewTab, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.newTab("") }},
+					PushButton{AssignTo: &mw.btnCloseTab, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.closeCurrentTab() }},
 				},
 			},
 			// ---- Conteúdo: navTree + tabWidget ----
@@ -243,6 +312,31 @@ func main() {
 	}).Create(); err != nil {
 		log.Fatal(err)
 	}
+
+	// Aplica ícones nos botões da toolbar global
+	navBtn := func(b *walk.PushButton, id int, tip string) {
+		if b == nil {
+			return
+		}
+		ic, _ := walk.NewIconFromResourceId(id)
+		if ic == nil {
+			b.SetText(tip)
+			return
+		}
+		hwnd := b.Handle()
+		if hwnd != 0 {
+			if style := win.GetWindowLong(hwnd, win.GWL_STYLE); style&0x40 == 0 {
+				win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x40)
+			}
+		}
+		b.SetImage(ic)
+		b.SetToolTipText(tip)
+	}
+	navBtn(mw.btnBack, 112, "Voltar (Alt+←)")
+	navBtn(mw.btnForward, 113, "Avançar (Alt+→)")
+	navBtn(mw.btnUp, 114, "Subir (Alt+↑)")
+	navBtn(mw.btnNewTab, 115, "Nova aba (Ctrl+T)")
+	navBtn(mw.btnCloseTab, 116, "Fechar aba (Ctrl+W)")
 
 	// Atalhos globais de teclado na janela principal
 	mw.KeyDown().Attach(func(key walk.Key) {
@@ -329,9 +423,12 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	title := fmt.Sprintf("Aba %d", tabIdx+1)
 
 	tp := &TabPane{
-		fileModel:  &FileTableModel{},
-		history:    make([]string, 0),
-		historyIdx: -1,
+		fileModel:      &FileTableModel{},
+		history:        make([]string, 0),
+		historyIdx:     -1,
+		previewVisible: false,
+		sortBy:         0,
+		sortDirAsc:     true,
 	}
 
 	// Cria o TabPage e adiciona ao TabWidget
@@ -350,6 +447,26 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 
 	// Constrói os widgets dentro do tabPage usando declarative
 	var composite *walk.Composite
+	var btnNewFolder, btnCut, btnCopy, btnPaste, btnRename, btnDelete, btnCompress, btnExtract, btnPreview *walk.PushButton
+
+	// Carrega ícones de recursos embutidos no .exe (resources.syso)
+	ico := func(id int) *walk.Icon {
+		ic, err := walk.NewIconFromResourceId(id)
+		if err != nil {
+			return nil
+		}
+		return ic
+	}
+	icFolder   := ico(101)
+	icCut      := ico(103)
+	icCopy     := ico(104)
+	icPaste    := ico(105)
+	icRename   := ico(106)
+	icDelete   := ico(107)
+	icCompress := ico(108)
+	icExtract  := ico(109)
+	icPreview  := ico(111)
+
 	builder := NewBuilder(tabPage)
 	if err := (Composite{
 		AssignTo: &composite,
@@ -377,20 +494,23 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 					},
 				},
 			},
-			// Toolbar de operações
+			// Toolbar de operações (ícones do shell + tooltips)
 			Composite{
-				Layout: HBox{},
+				Layout: HBox{MarginsZero: true},
 				Children: []Widget{
-					PushButton{Text: "Nova Pasta", OnClicked: func() { mw.createNewFolder() }},
+					PushButton{AssignTo: &btnNewFolder, Image: icFolder, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.createNewFolder() }},
 					VSeparator{},
-					PushButton{Text: "Recortar", OnClicked: func() { mw.cutSelected() }},
-					PushButton{Text: "Copiar", OnClicked: func() { mw.copySelected() }},
-					PushButton{Text: "Colar", OnClicked: func() { mw.pasteClipboard() }},
+					PushButton{AssignTo: &btnCut, Image: icCut, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.cutSelected() }},
+					PushButton{AssignTo: &btnCopy, Image: icCopy, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.copySelected() }},
+					PushButton{AssignTo: &btnPaste, Image: icPaste, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.pasteClipboard() }},
 					VSeparator{},
-					PushButton{Text: "Renomear", OnClicked: func() { mw.renameSelected() }},
-					PushButton{Text: "Excluir", OnClicked: func() { mw.deleteSelected() }},
+					PushButton{AssignTo: &btnRename, Image: icRename, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.renameSelected() }},
+					PushButton{AssignTo: &btnDelete, Image: icDelete, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.deleteSelected() }},
 					VSeparator{},
-					PushButton{Text: "Ordenar", OnClicked: func() { mw.cycleSortMode() }},
+					PushButton{AssignTo: &btnCompress, Image: icCompress, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.compressSelected() }},
+					PushButton{AssignTo: &btnExtract, Image: icExtract, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.extractSelected() }},
+					VSeparator{},
+					PushButton{AssignTo: &btnPreview, Image: icPreview, Text: "", MinSize: Size{28, 28}, MaxSize: Size{28, 28}, OnClicked: func() { mw.togglePreview() }},
 					HSpacer{},
 				},
 			},
@@ -464,12 +584,16 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 							Action{Text: "Nova Pasta", OnTriggered: func() { mw.createNewFolder() }},
 							Action{Text: "Nova Aba\tCtrl+T", OnTriggered: func() { mw.newTab("") }},
 							Action{Text: "Propriedades\tAlt+Enter", OnTriggered: func() { mw.showProperties() }},
+							Separator{},
+							Action{Text: "Comprimir...", OnTriggered: func() { mw.compressSelected() }},
+							Action{Text: "Extrair aqui", OnTriggered: func() { mw.extractHere() }},
+							Action{Text: "Extrair para...", OnTriggered: func() { mw.extractSelected() }},
 						},
 						Columns: []TableViewColumn{
-							{Title: "Nome", Width: 350},
-							{Title: "Modificado", Width: 150},
-							{Title: "Tipo", Width: 100},
+							{Title: "Nome", Width: 250},
+							{Title: "Tipo", Width: 90},
 							{Title: "Tamanho", Width: 100, Alignment: AlignFar},
+							{Title: "Modificado", Width: 150},
 						},
 						OnItemActivated:       func() { mw.activateSelected() },
 						OnCurrentIndexChanged: func() {
@@ -478,7 +602,8 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 						},
 					},
 					Composite{
-						Layout: VBox{},
+						AssignTo: &tp.previewComposite,
+						Layout:   VBox{},
 						Children: []Widget{
 							Label{AssignTo: &tp.previewLabel, Text: "Pré-visualização"},
 							ImageView{
@@ -501,10 +626,49 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	}
 	_ = composite
 
+	// Força BS_ICON em cada botão da toolbar (declarative.Image não aplica o estilo)
+		setBtn := func(b *walk.PushButton, ic *walk.Icon, tip string) {
+		if b == nil || ic == nil {
+			return
+		}
+		hwnd := b.Handle()
+		if hwnd == 0 {
+			return
+		}
+		if style := win.GetWindowLong(hwnd, win.GWL_STYLE); style&0x40 == 0 {
+			win.SetWindowLong(hwnd, win.GWL_STYLE, style|0x40) // BS_ICON
+		}
+		b.SetImage(ic)
+		b.SetToolTipText(tip)
+	}
+	setBtn(btnNewFolder, icFolder, "Nova pasta")
+	setBtn(btnCut, icCut, "Recortar (Ctrl+X)")
+	setBtn(btnCopy, icCopy, "Copiar (Ctrl+C)")
+	setBtn(btnPaste, icPaste, "Colar (Ctrl+V)")
+	setBtn(btnRename, icRename, "Renomear (F2)")
+	setBtn(btnDelete, icDelete, "Excluir (Del)")
+	setBtn(btnCompress, icCompress, "Comprimir")
+	setBtn(btnExtract, icExtract, "Extrair")
+	setBtn(btnPreview, icPreview, "Pré-visualização")
+
+	tp.fileList.ColumnClicked().Attach(func(col int) {
+		if tp.sortBy == col {
+			tp.sortDirAsc = !tp.sortDirAsc
+		} else {
+			tp.sortBy = col
+			tp.sortDirAsc = true
+		}
+		mw.sortTab(tp)
+	})
+
 	tp.tabPage = tabPage
+	if tp.previewComposite != nil {
+		tp.previewComposite.SetVisible(false)
+	}
 	mw.tabs = append(mw.tabs, tp)
 	mw.tabWidget.SetCurrentIndex(tabIdx)
 
+	log.Printf("Nova aba criada [%d]: %s", tabIdx, title)
 	if initialPath != "" {
 		mw.navigateTabTo(tp, initialPath)
 	}
@@ -512,19 +676,19 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 
 func (mw *GarqMainWindow) closeCurrentTab() {
 	if len(mw.tabs) <= 1 {
-		// Não fechar a última aba de navegação
+		log.Println("closeCurrentTab: apenas 1 aba, ignorando")
 		return
 	}
 	idx := mw.tabWidget.CurrentIndex()
 	if idx < 0 || idx >= len(mw.tabs) {
+		log.Printf("closeCurrentTab: índice inválido %d (tabs=%d)", idx, len(mw.tabs))
 		return
 	}
 	tp := mw.tabs[idx]
-	// Remove da lista
+	path := tp.currentPath()
+	log.Printf("Fechando aba [%d]: %s", idx, path)
 	mw.tabs = append(mw.tabs[:idx], mw.tabs[idx+1:]...)
-	// Remove o tabPage do widget
-	tp.tabPage.Dispose()
-	// Ajusta índice
+	mw.tabWidget.Pages().Remove(tp.tabPage)
 	newIdx := idx
 	if newIdx >= len(mw.tabs) {
 		newIdx = len(mw.tabs) - 1
@@ -546,33 +710,69 @@ func (mw *GarqMainWindow) nextTab() {
 func (mw *GarqMainWindow) onTabChanged() {
 	tp := mw.activeTab()
 	if tp == nil {
+		log.Println("onTabChanged: aba ativa é nil")
 		return
 	}
+	mw.updateNavButtons()
 	mw.updateStatusBar()
 }
 
-func buildNavTree(model *NavTreeModel) {
-	thisPC := &NavItem{text: "Este PC", path: ""}
-	userFolders := []struct{ name, path string }{
+func (mw *GarqMainWindow) togglePreview() {
+	tp := mw.activeTab()
+	if tp == nil || tp.previewComposite == nil {
+		log.Println("togglePreview: aba ou composite nil")
+		return
+	}
+	tp.previewVisible = !tp.previewVisible
+	tp.previewComposite.SetVisible(tp.previewVisible)
+	log.Printf("togglePreview: %v", tp.previewVisible)
+}
+
+func makeNavItem(text, path string, parent *NavItem) *NavItem {
+	return &NavItem{text: text, path: path, parent: parent, children: nil, isSection: false}
+}
+
+func makeSection(text string) *NavItem {
+	return &NavItem{text: text, path: "", parent: nil, children: nil, isSection: true}
+}
+
+func buildSectionedNavTree(model *NavTreeModel) {
+	qa := makeSection("Acesso Rápido")
+	for _, f := range []struct{ name, path string }{
+		{"Área de Trabalho", filepath.Join(os.Getenv("USERPROFILE"), "Desktop")},
+		{"Downloads", filepath.Join(os.Getenv("USERPROFILE"), "Downloads")},
+		{"Documentos", filepath.Join(os.Getenv("USERPROFILE"), "Documents")},
+	} {
+		if _, err := os.Stat(f.path); err == nil {
+			qa.children = append(qa.children, makeNavItem(f.name, f.path, qa))
+		}
+	}
+
+	drives := makeNavItem("Unidades", "", nil)
+	for c := 'A'; c <= 'Z'; c++ {
+		drive := string(c) + ":\\"
+		if _, err := os.Stat(drive); err == nil {
+			drives.children = append(drives.children, makeNavItem(drive, drive, drives))
+		}
+	}
+
+	thisPC := makeSection("Este PC")
+	for _, f := range []struct{ name, path string }{
 		{"Área de Trabalho", filepath.Join(os.Getenv("USERPROFILE"), "Desktop")},
 		{"Documentos", filepath.Join(os.Getenv("USERPROFILE"), "Documents")},
 		{"Downloads", filepath.Join(os.Getenv("USERPROFILE"), "Downloads")},
 		{"Imagens", filepath.Join(os.Getenv("USERPROFILE"), "Pictures")},
 		{"Músicas", filepath.Join(os.Getenv("USERPROFILE"), "Music")},
 		{"Vídeos", filepath.Join(os.Getenv("USERPROFILE"), "Videos")},
-	}
-	for _, f := range userFolders {
+	} {
 		if _, err := os.Stat(f.path); err == nil {
-			thisPC.children = append(thisPC.children, &NavItem{text: f.name, path: f.path, parent: thisPC})
+			thisPC.children = append(thisPC.children, makeNavItem(f.name, f.path, thisPC))
 		}
 	}
-	for c := 'A'; c <= 'Z'; c++ {
-		drive := string(c) + ":\\"
-		if _, err := os.Stat(drive); err == nil {
-			thisPC.children = append(thisPC.children, &NavItem{text: drive, path: drive, parent: thisPC})
-		}
-	}
-	model.roots = []*NavItem{thisPC}
+	thisPC.children = append(thisPC.children, drives)
+	drives.parent = thisPC
+
+	model.roots = []*NavItem{qa, thisPC}
 }
 
 
@@ -586,7 +786,7 @@ func (mw *GarqMainWindow) onNavItemSelected() {
 		return
 	}
 	navItem, ok := item.(*NavItem)
-	if !ok || navItem.path == "" {
+	if !ok || navItem.path == "" || navItem.isSection {
 		return
 	}
 	mw.navigateTo(navItem.path)
@@ -611,17 +811,18 @@ func (mw *GarqMainWindow) activateSelected() {
 	}
 }
 
-// navigateTo navega a aba ativa para o path dado.
 func (mw *GarqMainWindow) navigateTo(path string) {
 	tp := mw.activeTab()
 	if tp == nil {
+		log.Println("navigateTo: aba ativa é nil")
 		return
 	}
+	log.Printf("navigateTo: %s", path)
 	mw.navigateTabTo(tp, path)
 }
 
-// navigateTabTo navega uma aba específica para o path dado.
 func (mw *GarqMainWindow) navigateTabTo(tp *TabPane, path string) {
+	log.Printf("navigateTabTo: %s", path)
 	mw.Synchronize(func() {
 		tp.pathEdit.SetText(path)
 		mw.statusLabel.SetText("Carregando...")
@@ -629,6 +830,7 @@ func (mw *GarqMainWindow) navigateTabTo(tp *TabPane, path string) {
 
 	entries, err := mw.api.ListDirectory(path)
 	if err != nil {
+		log.Printf("navigateTabTo erro ListDirectory: %v", err)
 		mw.Synchronize(func() { mw.statusLabel.SetText(fmt.Sprintf("Erro: %v", err)) })
 		return
 	}
@@ -639,60 +841,67 @@ func (mw *GarqMainWindow) navigateTabTo(tp *TabPane, path string) {
 		p, _ := e["path"].(string)
 		isDir, _ := e["is_dir"].(bool)
 		size, _ := e["size"].(int64)
-		modTime, _ := e["mod_time"].(string)
-		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: modTime})
+		modStr, _ := e["mod_time"].(string)
+		mt, _ := time.Parse("2006-01-02 15:04:05", modStr)
+		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: mt})
 	}
 
-	sort.Slice(fileEntries, func(i, j int) bool {
-		if fileEntries[i].IsDir != fileEntries[j].IsDir {
-			return fileEntries[i].IsDir
-		}
-		return fileEntries[i].Name < fileEntries[j].Name
-	})
-
 	if len(tp.history) == 0 || tp.history[len(tp.history)-1] != path {
-		// Trunca forward history ao navegar
 		tp.history = append(tp.history[:tp.historyIdx+1], path)
 		tp.historyIdx = len(tp.history) - 1
 	}
 
-	// Atualiza título da aba
-	tabTitle := filepath.Base(path)
-	if tabTitle == "" || tabTitle == "." {
-		tabTitle = path
-	}
+	title := tabTitle(path)
+
+	tp.fileModel.entries = fileEntries
+	tp.allEntries = fileEntries
+	mw.sortTab(tp)
 
 	mw.Synchronize(func() {
-		tp.fileModel.entries = fileEntries
-		tp.allEntries = fileEntries
-		tp.fileList.SetModel(tp.fileModel)
-		tp.tabPage.SetTitle(tabTitle)
+		tp.tabPage.SetTitle(title)
+		if icon := getShellIcon(path); icon != nil {
+			tp.tabPage.SetImage(icon)
+		}
 		mw.statusLabel.SetText(fmt.Sprintf("%d itens", len(fileEntries)))
 		if tp.searchEdit != nil {
 			tp.searchEdit.SetText("")
 		}
 	})
+	mw.updateNavButtons()
 }
 
 func (mw *GarqMainWindow) goBack() {
 	tp := mw.activeTab()
-	if tp == nil || tp.historyIdx <= 0 {
+	if tp == nil {
+		log.Println("goBack: aba ativa é nil")
+		return
+	}
+	if tp.historyIdx <= 0 {
+		log.Printf("goBack: sem histórico (idx=%d)", tp.historyIdx)
 		return
 	}
 	tp.historyIdx--
 	path := tp.history[tp.historyIdx]
-	// Navega sem adicionar ao histórico
+	log.Printf("goBack: %s (idx=%d)", path, tp.historyIdx)
 	mw.navigateTabDirect(tp, path)
+	mw.updateNavButtons()
 }
 
 func (mw *GarqMainWindow) goForward() {
 	tp := mw.activeTab()
-	if tp == nil || tp.historyIdx >= len(tp.history)-1 {
+	if tp == nil {
+		log.Println("goForward: aba ativa é nil")
+		return
+	}
+	if tp.historyIdx >= len(tp.history)-1 {
+		log.Printf("goForward: sem histórico futuro (idx=%d, len=%d)", tp.historyIdx, len(tp.history))
 		return
 	}
 	tp.historyIdx++
 	path := tp.history[tp.historyIdx]
+	log.Printf("goForward: %s (idx=%d)", path, tp.historyIdx)
 	mw.navigateTabDirect(tp, path)
+	mw.updateNavButtons()
 }
 
 // navigateTabDirect carrega o diretório sem alterar o histórico (usado por goBack/goForward).
@@ -714,47 +923,55 @@ func (mw *GarqMainWindow) navigateTabDirect(tp *TabPane, path string) {
 		p, _ := e["path"].(string)
 		isDir, _ := e["is_dir"].(bool)
 		size, _ := e["size"].(int64)
-		modTime, _ := e["mod_time"].(string)
-		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: modTime})
+		modStr, _ := e["mod_time"].(string)
+		mt, _ := time.Parse("2006-01-02 15:04:05", modStr)
+		fileEntries = append(fileEntries, FileEntry{Name: name, Path: p, IsDir: isDir, Size: size, ModTime: mt})
 	}
 
-	sort.Slice(fileEntries, func(i, j int) bool {
-		if fileEntries[i].IsDir != fileEntries[j].IsDir {
-			return fileEntries[i].IsDir
-		}
-		return fileEntries[i].Name < fileEntries[j].Name
-	})
+	title := tabTitle(path)
 
-	tabTitle := filepath.Base(path)
-	if tabTitle == "" || tabTitle == "." {
-		tabTitle = path
-	}
+	tp.fileModel.entries = fileEntries
+	tp.allEntries = fileEntries
+	mw.sortTab(tp)
 
 	mw.Synchronize(func() {
-		tp.fileModel.entries = fileEntries
-		tp.allEntries = fileEntries
-		tp.fileList.SetModel(tp.fileModel)
-		tp.tabPage.SetTitle(tabTitle)
+		tp.tabPage.SetTitle(title)
+		if icon := getShellIcon(path); icon != nil {
+			tp.tabPage.SetImage(icon)
+		}
 		mw.statusLabel.SetText(fmt.Sprintf("%d itens", len(fileEntries)))
 		if tp.searchEdit != nil {
 			tp.searchEdit.SetText("")
 		}
 	})
+	mw.updateNavButtons()
 }
 
 func (mw *GarqMainWindow) goUp() {
 	tp := mw.activeTab()
 	if tp == nil {
+		log.Println("goUp: aba ativa é nil")
 		return
 	}
 	current := tp.currentPath()
 	if current == "" {
+		log.Println("goUp: caminho vazio")
 		return
 	}
 	parent := filepath.Dir(current)
 	if parent != current {
+		log.Printf("goUp: %s -> %s", current, parent)
 		mw.navigateTo(parent)
 	}
+}
+
+func (mw *GarqMainWindow) updateNavButtons() {
+	tp := mw.activeTab()
+	if tp == nil || mw.btnBack == nil || mw.btnForward == nil {
+		return
+	}
+	mw.btnBack.SetEnabled(tp.historyIdx > 0)
+	mw.btnForward.SetEnabled(tp.historyIdx < len(tp.history)-1)
 }
 
 func (mw *GarqMainWindow) updateStatusBar() {
@@ -847,6 +1064,9 @@ func containsIgnoreCase(s, sub string) bool {
 func (mw *GarqMainWindow) updatePreview() {
 	tp := mw.activeTab()
 	if tp == nil {
+		return
+	}
+	if !tp.previewVisible {
 		return
 	}
 	idx := tp.fileList.CurrentIndex()
@@ -1096,32 +1316,33 @@ func (mw *GarqMainWindow) deleteSelectedPermanently() {
 	}
 }
 
-func (mw *GarqMainWindow) cycleSortMode() {
-	tp := mw.activeTab()
-	if tp == nil {
-		return
+func (mw *GarqMainWindow) sortTab(tp *TabPane) {
+	asc := tp.sortDirAsc
+	for _, entries := range [][]FileEntry{tp.fileModel.entries, tp.allEntries} {
+		sort.SliceStable(entries, func(i, j int) bool {
+			if entries[i].IsDir != entries[j].IsDir {
+				return entries[i].IsDir
+			}
+			var less bool
+			switch tp.sortBy {
+			case 1:
+				extI := filepath.Ext(entries[i].Name)
+				extJ := filepath.Ext(entries[j].Name)
+				less = extI < extJ
+			case 2:
+				less = entries[i].Size < entries[j].Size
+			case 3:
+				less = entries[i].ModTime.Before(entries[j].ModTime)
+			default:
+				less = entries[i].Name < entries[j].Name
+			}
+			if asc {
+				return less
+			}
+			return !less
+		})
 	}
-	tp.sortBy = (tp.sortBy + 1) % 4
-	entries := tp.fileModel.entries
-	sort.Slice(entries, func(i, j int) bool {
-		if entries[i].IsDir != entries[j].IsDir {
-			return entries[i].IsDir
-		}
-		switch tp.sortBy {
-		case 1:
-			return entries[i].Size < entries[j].Size
-		case 2:
-			return filepath.Ext(entries[i].Name) < filepath.Ext(entries[j].Name)
-		case 3:
-			return entries[i].ModTime < entries[j].ModTime
-		default:
-			return entries[i].Name < entries[j].Name
-		}
-	})
-	tp.fileModel.entries = entries
 	mw.Synchronize(func() { tp.fileList.SetModel(tp.fileModel) })
-	names := []string{"Nome", "Tamanho", "Tipo", "Data"}
-	mw.statusLabel.SetText(fmt.Sprintf("Ordenado por %s", names[tp.sortBy]))
 }
 
 func (mw *GarqMainWindow) showProperties() {

@@ -1,0 +1,24 @@
+// Garq resources — manifest + toolbar icons
+// Compile: windres -i resources.rc -o resources.syso
+// then delete rsrc.syso
+
+// Application manifest (RT_MANIFEST, id=1)
+1 24 "manifest.xml"
+
+// Toolbar icons
+101 ICON "../../assets/icons/folder.ico"
+102 ICON "../../assets/icons/file.ico"
+103 ICON "../../assets/icons/cut.ico"
+104 ICON "../../assets/icons/copy.ico"
+105 ICON "../../assets/icons/paste.ico"
+106 ICON "../../assets/icons/rename.ico"
+107 ICON "../../assets/icons/delete.ico"
+108 ICON "../../assets/icons/compress.ico"
+109 ICON "../../assets/icons/extract.ico"
+110 ICON "../../assets/icons/sort.ico"
+111 ICON "../../assets/icons/preview.ico"
+112 ICON "../../assets/icons/back.ico"
+113 ICON "../../assets/icons/forward.ico"
+114 ICON "../../assets/icons/up.ico"
+115 ICON "../../assets/icons/newtab.ico"
+116 ICON "../../assets/icons/closetab.ico"

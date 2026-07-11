@@ -30,7 +30,7 @@ Status: Backlog
 - **[X] UI Explorer 11** — Toolbar, breadcrumb, nav pane, content list, details pane, status bar
 - **[X] Configurações de conflito** — Modal com select por operação
 - **[X] Permissões de arquivo** — Coluna "Permissões" no content list
-- **[ ] Progresso de compactação/extração é grosseiro** — 0→0.5→1.0
+- **[X] Progresso de compactação/extração é grosseiro** — 0→0.5→1.0
 
 ## 5. Infraestrutura
 
