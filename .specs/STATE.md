@@ -18,11 +18,11 @@
 
 **Feature**: front-end-melhorias
 **Branch**: `feature/front-end-melhorias`
-**Status**: All phases complete — awaiting feature-level validation
-**Phase / Task**: Verifier validation (final step)
-**Completed**: T1–T17 (all phases)
+**Status**: ✅ Feature complete and verified
+**Phase / Task**: Done — Verifier PASS, gaps fixed
+**Completed**: T1–T17 + post-verification fixes
 **In progress**: None
-**Next step**: Dispatch Verifier sub-agent for feature-level validation
+**Next step**: Push branch `feature/front-end-melhorias` to remote
 **Blockers**: None
 **Uncommitted files**: `.specs/STATE.md` update
-**Commit range**: `9ff4875..d2e2ef9`
+**Commit range**: `9ff4875..2ebaf74`
