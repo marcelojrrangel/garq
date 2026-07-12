@@ -274,6 +274,9 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	}
 	mw.tabs = append(mw.tabs, tp)
 	mw.tabWidget.SetCurrentIndex(tabIdx)
+	if tp.fileList != nil {
+		tp.fileList.SetFocus()
+	}
 	mw.sortTab(tp)
 	mw.updateToolbarState(tp)
 
@@ -325,6 +328,9 @@ func (mw *GarqMainWindow) onTabChanged() {
 	mw.updateNavButtons()
 	mw.updateStatusBar()
 	mw.updateToolbarState(tp)
+	if tp.fileList != nil {
+		tp.fileList.SetFocus()
+	}
 }
 
 func (mw *GarqMainWindow) togglePreview() {

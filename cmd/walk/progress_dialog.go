@@ -292,7 +292,7 @@ func (pd *ProgressDialog) update(j service.JobSnapshot) {
 			// Atualiza a listagem imediatamente
 			pd.mw.refreshActiveTab()
 			go func() {
-				time.Sleep(3 * time.Second)
+				time.Sleep(10 * time.Second)
 				pd.mw.Synchronize(func() {
 					if pd.dialog != nil {
 						pd.dialog.Close(walk.DlgCmdOK)
