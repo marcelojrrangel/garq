@@ -18,11 +18,11 @@
 
 **Feature**: front-end-melhorias
 **Branch**: `feature/front-end-melhorias`
-**Status**: Phase 2 complete — service layer implemented; ready for Phase 3
-**Phase / Task**: Phase 3, T11 (next)
-**Completed**: T1–T10 (Phase 1 + Phase 2)
+**Status**: All phases complete — awaiting feature-level validation
+**Phase / Task**: Verifier validation (final step)
+**Completed**: T1–T17 (all phases)
 **In progress**: None
-**Next step**: Dispatch Worker 3 for Phase 3 (T11–T17: UI split + UX polish)
+**Next step**: Dispatch Verifier sub-agent for feature-level validation
 **Blockers**: None
 **Uncommitted files**: `.specs/STATE.md` update
-**Commit range**: `9ff4875..11b2674`
+**Commit range**: `9ff4875..d2e2ef9`
