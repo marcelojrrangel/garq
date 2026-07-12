@@ -49,7 +49,7 @@ func (mw *GarqMainWindow) extractHere() {
 	baseName := strings.TrimSuffix(filepath.Base(archive), filepath.Ext(archive))
 	dest := filepath.Join(curPath, baseName)
 
-	jobID, err := mw.api.AddExtractJob(archive, dest, "rename")
+	jobID, err := mw.service.Extract(archive, dest, "rename")
 	if err != nil {
 		mw.statusLabel.SetText(fmt.Sprintf("Erro ao enfileirar: %v", err))
 		return
@@ -157,7 +157,7 @@ func (mw *GarqMainWindow) extractDialog(archive string) {
 								walk.MsgBox(dlg, "Erro", "A pasta de destino não pode estar vazia", walk.MsgBoxIconError)
 								return
 							}
-							jobID, err := mw.api.AddExtractJob(archive, dest, conflict)
+							jobID, err := mw.service.Extract(archive, dest, conflict)
 							if err != nil {
 								walk.MsgBox(dlg, "Erro", fmt.Sprintf("Erro ao enfileirar: %v", err), walk.MsgBoxIconError)
 								return

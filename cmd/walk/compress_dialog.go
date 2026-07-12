@@ -146,7 +146,7 @@ func (mw *GarqMainWindow) compressDialog(sources []string) {
 								name += ".7z"
 							}
 							fullDest := filepath.Join(dest, name)
-							jobID, err := mw.api.AddCompressJob(sources, fullDest, conflict)
+							jobID, err := mw.service.Compress(sources, fullDest, conflict)
 							if err != nil {
 								walk.MsgBox(dlg, "Erro", fmt.Sprintf("Erro ao enfileirar: %v", err), walk.MsgBoxIconError)
 								return

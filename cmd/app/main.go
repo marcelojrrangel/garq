@@ -27,7 +27,7 @@ func main() {
 	// Start worker pool
 	store := &db.DBStore{DB: dbConn}
 	worker.StartWorkerPool(4, store, compress.CLIAdapter{}, copyimpl.CopierAdapter{})
-	bindAPI := &api.API{DB: dbConn}
+	bindAPI := api.New(dbConn)
 
 	// Minimal HTTP API for demonstration (replace with Wails bindings)
 	http.HandleFunc("/jobs/copy", func(w http.ResponseWriter, r *http.Request) {

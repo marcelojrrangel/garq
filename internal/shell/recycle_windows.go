@@ -1,6 +1,6 @@
 //go:build windows
 
-package main
+package shell
 
 import (
 	"syscall"
@@ -23,11 +23,11 @@ type shFileOpStruct struct {
 }
 
 const (
-	foDelete    = 0x0003
-	fofAllowUndo       = 0x0040 // manda para a lixeira
-	fofNoConfirmation  = 0x0010 // não pede confirmação
-	fofSilent          = 0x0004 // sem dialog de progresso do shell (usamos o nosso)
-	fofNoErrorUI       = 0x0400 // sem dialog de erro do shell
+	foDelete          = 0x0003
+	fofAllowUndo      = 0x0040 // manda para a lixeira
+	fofNoConfirmation = 0x0010 // não pede confirmação
+	fofSilent         = 0x0004 // sem dialog de progresso do shell (usamos o nosso)
+	fofNoErrorUI      = 0x0400 // sem dialog de erro do shell
 )
 
 var (
@@ -42,8 +42,6 @@ func RecycleItems(paths []string) error {
 		return nil
 	}
 
-	// SHFileOperation espera um único buffer com todos os caminhos
-	// separados por nulo e terminado com nulo duplo.
 	from := multiStringToDoubleNull(paths)
 
 	op := shFileOpStruct{
