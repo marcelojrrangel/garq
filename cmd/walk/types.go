@@ -40,6 +40,7 @@ type TabPane struct {
 	historyIdx       int
 	sortBy           int
 	sortDirAsc       bool
+	columnTitles     []string
 }
 
 func (tp *TabPane) currentPath() string {

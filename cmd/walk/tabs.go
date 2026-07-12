@@ -253,6 +253,8 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	setBtn(btnExtract, icExtract, "Extrair")
 	setBtn(btnPreview, icPreview, "Pré-visualização")
 
+	tp.columnTitles = []string{"Nome", "Tipo", "Tamanho", "Modificado"}
+
 	tp.fileList.ColumnClicked().Attach(func(col int) {
 		if tp.sortBy == col {
 			tp.sortDirAsc = !tp.sortDirAsc
@@ -269,6 +271,7 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	}
 	mw.tabs = append(mw.tabs, tp)
 	mw.tabWidget.SetCurrentIndex(tabIdx)
+	mw.sortTab(tp)
 
 	log.Printf("Nova aba criada [%d]: %s", tabIdx, title)
 	if initialPath != "" {

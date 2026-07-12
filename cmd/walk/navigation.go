@@ -262,5 +262,21 @@ func (mw *GarqMainWindow) sortTab(tp *TabPane) {
 			return !less
 		})
 	}
+
+	cols := tp.fileList.Columns()
+	for i, base := range tp.columnTitles {
+		title := base
+		if i == tp.sortBy {
+			if asc {
+				title += " ▲"
+			} else {
+				title += " ▼"
+			}
+		}
+		if i < cols.Len() {
+			cols.At(i).SetTitle(title)
+		}
+	}
+
 	mw.Synchronize(func() { tp.fileList.SetModel(tp.fileModel) })
 }
