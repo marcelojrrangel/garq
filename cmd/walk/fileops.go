@@ -229,7 +229,7 @@ func (mw *GarqMainWindow) showProperties() {
 	var contentLabel *walk.Label
 	if isDir {
 		addLabel("Tipo: Pasta")
-		contentLabel = addLabel(" Conteúdo: Contando...")
+		contentLabel = addLabel("Conteúdo: Contando...")
 	} else {
 		addLabel(fmt.Sprintf("Tipo: %s", filepath.Ext(entry.Name)))
 		addLabel(fmt.Sprintf("Tamanho: %s", formatSize(info.Size())))
