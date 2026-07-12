@@ -104,6 +104,12 @@ func scanLinesWithCarriageReturn(data []byte, atEOF bool) (advance int, token []
 
 func streamProgress(rc io.ReadCloser, cb ProgressFunc, ctx context.Context) {
 	scanner := bufio.NewScanner(rc)
+	// Increase buffer size to avoid "token too long" errors when 7z outputs very long lines.
+
+	const maxCapacity = 1024 * 1024 // 1 MiB
+	buf := make([]byte, 64*1024)
+	scanner.Buffer(buf, maxCapacity)
+
 	scanner.Split(scanLinesWithCarriageReturn)
 	for scanner.Scan() {
 		line := scanner.Text()
