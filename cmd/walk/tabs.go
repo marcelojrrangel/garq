@@ -49,7 +49,6 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 
 	// Constrói os widgets dentro do tabPage usando declarative
 	var composite *walk.Composite
-	var btnNewFolder, btnCut, btnCopy, btnPaste, btnRename, btnDelete, btnCompress, btnExtract, btnPreview *walk.PushButton
 
 	// Carrega ícones de recursos embutidos no .exe (resources.syso)
 	ico := func(id int) *walk.Icon {
@@ -100,19 +99,19 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 			Composite{
 				Layout: HBox{MarginsZero: true},
 				Children: []Widget{
-					PushButton{AssignTo: &btnNewFolder, Image: icFolder, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.createNewFolder() }},
+					PushButton{AssignTo: &tp.btnNewFolder, Image: icFolder, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.createNewFolder() }},
 					VSeparator{},
-					PushButton{AssignTo: &btnCut, Image: icCut, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.cutSelected() }},
-					PushButton{AssignTo: &btnCopy, Image: icCopy, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.copySelected() }},
-					PushButton{AssignTo: &btnPaste, Image: icPaste, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.pasteClipboard() }},
+					PushButton{AssignTo: &tp.btnCut, Image: icCut, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.cutSelected() }},
+					PushButton{AssignTo: &tp.btnCopy, Image: icCopy, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.copySelected() }},
+					PushButton{AssignTo: &tp.btnPaste, Image: icPaste, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.pasteClipboard() }},
 					VSeparator{},
-					PushButton{AssignTo: &btnRename, Image: icRename, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.renameSelected() }},
-					PushButton{AssignTo: &btnDelete, Image: icDelete, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.deleteSelected() }},
+					PushButton{AssignTo: &tp.btnRename, Image: icRename, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.renameSelected() }},
+					PushButton{AssignTo: &tp.btnDelete, Image: icDelete, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.deleteSelected() }},
 					VSeparator{},
-					PushButton{AssignTo: &btnCompress, Image: icCompress, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.compressSelected() }},
-					PushButton{AssignTo: &btnExtract, Image: icExtract, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.extractSelected() }},
+					PushButton{AssignTo: &tp.btnCompress, Image: icCompress, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.compressSelected() }},
+					PushButton{AssignTo: &tp.btnExtract, Image: icExtract, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.extractSelected() }},
 					VSeparator{},
-					PushButton{AssignTo: &btnPreview, Image: icPreview, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.togglePreview() }},
+					PushButton{AssignTo: &tp.btnPreview, Image: icPreview, Text: "", MinSize: Size{Width: 28, Height: 28}, MaxSize: Size{Width: 28, Height: 28}, OnClicked: func() { mw.togglePreview() }},
 					HSpacer{},
 				},
 			},
@@ -243,15 +242,15 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 		b.SetImage(ic)
 		b.SetToolTipText(tip)
 	}
-	setBtn(btnNewFolder, icFolder, "Nova pasta")
-	setBtn(btnCut, icCut, "Recortar (Ctrl+X)")
-	setBtn(btnCopy, icCopy, "Copiar (Ctrl+C)")
-	setBtn(btnPaste, icPaste, "Colar (Ctrl+V)")
-	setBtn(btnRename, icRename, "Renomear (F2)")
-	setBtn(btnDelete, icDelete, "Excluir (Del)")
-	setBtn(btnCompress, icCompress, "Comprimir")
-	setBtn(btnExtract, icExtract, "Extrair")
-	setBtn(btnPreview, icPreview, "Pré-visualização")
+	setBtn(tp.btnNewFolder, icFolder, "Nova pasta")
+	setBtn(tp.btnCut, icCut, "Recortar (Ctrl+X)")
+	setBtn(tp.btnCopy, icCopy, "Copiar (Ctrl+C)")
+	setBtn(tp.btnPaste, icPaste, "Colar (Ctrl+V)")
+	setBtn(tp.btnRename, icRename, "Renomear (F2)")
+	setBtn(tp.btnDelete, icDelete, "Excluir (Del)")
+	setBtn(tp.btnCompress, icCompress, "Comprimir")
+	setBtn(tp.btnExtract, icExtract, "Extrair")
+	setBtn(tp.btnPreview, icPreview, "Pré-visualização")
 
 	tp.columnTitles = []string{"Nome", "Tipo", "Tamanho", "Modificado"}
 
@@ -265,6 +264,10 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 		mw.sortTab(tp)
 	})
 
+	tp.fileList.SelectedIndexesChanged().Attach(func() {
+		mw.updateToolbarState(tp)
+	})
+
 	tp.tabPage = tabPage
 	if tp.previewComposite != nil {
 		tp.previewComposite.SetVisible(false)
@@ -272,6 +275,7 @@ func (mw *GarqMainWindow) newTab(initialPath string) {
 	mw.tabs = append(mw.tabs, tp)
 	mw.tabWidget.SetCurrentIndex(tabIdx)
 	mw.sortTab(tp)
+	mw.updateToolbarState(tp)
 
 	log.Printf("Nova aba criada [%d]: %s", tabIdx, title)
 	if initialPath != "" {
@@ -320,6 +324,7 @@ func (mw *GarqMainWindow) onTabChanged() {
 	}
 	mw.updateNavButtons()
 	mw.updateStatusBar()
+	mw.updateToolbarState(tp)
 }
 
 func (mw *GarqMainWindow) togglePreview() {

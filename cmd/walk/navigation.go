@@ -96,6 +96,7 @@ func (mw *GarqMainWindow) navigateTabDirect(tp *TabPane, path string) {
 		}
 	})
 	mw.updateNavButtons()
+	mw.updateToolbarState(tp)
 }
 
 func (mw *GarqMainWindow) goBack() {
@@ -147,6 +148,53 @@ func (mw *GarqMainWindow) goUp() {
 	if parent != current {
 		log.Printf("goUp: %s -> %s", current, parent)
 		mw.navigateTo(parent)
+	}
+}
+
+func (mw *GarqMainWindow) updateToolbarState(tp *TabPane) {
+	selCount := 0
+	var selectedPath string
+	if tp != nil && tp.fileList != nil {
+		idxs := tp.fileList.SelectedIndexes()
+		selCount = len(idxs)
+		if selCount == 1 && idxs[0] >= 0 && idxs[0] < len(tp.fileModel.entries) {
+			selectedPath = tp.fileModel.entries[idxs[0]].Path
+		}
+	}
+
+	hasClipboard := false
+	if mw.service != nil {
+		if op, err := mw.service.GetClipboard(); err == nil && len(op.Paths) > 0 {
+			hasClipboard = true
+		}
+	}
+
+	if tp != nil {
+		if tp.btnPaste != nil {
+			tp.btnPaste.SetEnabled(hasClipboard)
+		}
+		if tp.btnRename != nil {
+			tp.btnRename.SetEnabled(selCount == 1)
+		}
+		if tp.btnCut != nil {
+			tp.btnCut.SetEnabled(selCount > 0)
+		}
+		if tp.btnCopy != nil {
+			tp.btnCopy.SetEnabled(selCount > 0)
+		}
+		if tp.btnDelete != nil {
+			tp.btnDelete.SetEnabled(selCount > 0)
+		}
+		if tp.btnCompress != nil {
+			tp.btnCompress.SetEnabled(selCount > 0)
+		}
+		if tp.btnExtract != nil {
+			tp.btnExtract.SetEnabled(selCount == 1 && isArchiveFile(selectedPath))
+		}
+	}
+
+	if mw.btnCloseTab != nil {
+		mw.btnCloseTab.SetEnabled(len(mw.tabs) > 1)
 	}
 }
 

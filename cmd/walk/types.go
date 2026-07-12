@@ -41,6 +41,15 @@ type TabPane struct {
 	sortBy           int
 	sortDirAsc       bool
 	columnTitles     []string
+	btnNewFolder     *walk.PushButton
+	btnCut           *walk.PushButton
+	btnCopy          *walk.PushButton
+	btnPaste         *walk.PushButton
+	btnRename        *walk.PushButton
+	btnDelete        *walk.PushButton
+	btnCompress      *walk.PushButton
+	btnExtract       *walk.PushButton
+	btnPreview       *walk.PushButton
 }
 
 func (tp *TabPane) currentPath() string {
