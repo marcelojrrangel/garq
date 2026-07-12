@@ -166,6 +166,14 @@ func (mw *GarqMainWindow) updateStatusBar() {
 		return
 	}
 	total := len(tp.fileModel.entries)
+	if total == 0 {
+		if tp.searchEdit == nil || tp.searchEdit.Text() == "" {
+			mw.statusLabel.SetText("Pasta vazia")
+		} else {
+			mw.statusLabel.SetText(fmt.Sprintf("Nenhum item corresponde a '%s'", tp.searchEdit.Text()))
+		}
+		return
+	}
 	sel := len(tp.fileList.SelectedIndexes())
 	if sel > 0 {
 		mw.statusLabel.SetText(fmt.Sprintf("%d itens, %d selecionados", total, sel))
